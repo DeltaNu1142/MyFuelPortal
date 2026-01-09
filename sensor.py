@@ -3,22 +3,23 @@ import re
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import requests
+
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 
 _LOGGER = logging.getLogger(__name__)
 
 def to_iso(date_str):
-    """Convert tank portal's date ('MM/DD/YYYY' or text) to ISO 'YYYY-MM-DD'."""
+    """Convert tank portal's date ('MM/DD/YYYY') to ISO 'YYYY-MM-DD'."""
     if not date_str or date_str.strip() == "":
         return None
     try:
-        # Typical format: 01/12/2024
         dt = datetime.strptime(date_str.strip(), "%m/%d/%Y")
         return dt.date().isoformat()
-    except:
-        return date_str  # fallback (keeps original)
-    
+    except Exception:
+        return date_str  # fallback: keep original
+
 
 async def async_setup_entry(hass, entry, async_add_entities):
     username = entry.data["username"]
@@ -36,6 +37,7 @@ async def async_setup_entry(hass, entry, async_add_entities):
             MyFuelPortalSensor(coordinator, tank_name, "capacity"),
             MyFuelPortalSensor(coordinator, tank_name, "last_delivery"),
             MyFuelPortalSensor(coordinator, tank_name, "reading_date"),
+            MyFuelPortalUsageSensor(coordinator, tank_name),
         ])
     async_add_entities(sensors, True)
 
@@ -54,6 +56,7 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
         self.password = password
 
     async def _async_update_data(self):
+        """Fetch data from the portal."""
         def fetch_data():
             LOGIN_URL = "https://MYPROVIDER.myfuelportal.com/Account/Login?ReturnUrl=%2F"
             DATA_URL = "https://MYPROVIDER.myfuelportal.com/Tank"
@@ -74,6 +77,7 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
                 "RememberMe": "false",
                 "__RequestVerificationToken": token
             }
+
             resp = session.post(LOGIN_URL, data=payload, timeout=10)
             if "/Account/Login" in resp.url:
                 raise UpdateFailed("Login failed: invalid credentials")
@@ -117,7 +121,9 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
                         "gallons": gallons,
                         "capacity": capacity,
                         "last_delivery": last_delivery,
-                        "reading_date": reading_date
+                        "reading_date": reading_date,
+                        "prev_gallons": gallons,
+                        "prev_date": reading_date
                     })
                 except Exception as e:
                     _LOGGER.warning("Failed to parse a tank: %s", e)
@@ -128,7 +134,7 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
 
 
 class MyFuelPortalSensor(Entity):
-    """Sensor for a tank and value."""
+    """Generic sensor for a tank and value."""
 
     def __init__(self, coordinator, tank_name, sensor_type):
         self.coordinator = coordinator
@@ -152,6 +158,72 @@ class MyFuelPortalSensor(Entity):
             if tank["name"] == self.tank_name:
                 return tank.get(self.sensor_type)
         return None
+
+    @property
+    def device_class(self):
+        if self.sensor_type in ["gallons", "capacity"]:
+            return SensorDeviceClass.GAS
+        return None
+
+    @property
+    def state_class(self):
+        if self.sensor_type in ["gallons", "capacity"]:
+            return SensorStateClass.TOTAL_INCREASING
+        return None
+
+    async def async_update(self):
+        await self.coordinator.async_request_refresh()
+
+
+class MyFuelPortalUsageSensor(Entity):
+    """Sensor to track daily gallons used for a tank (for Energy dashboard)."""
+
+    def __init__(self, coordinator, tank_name):
+        self.coordinator = coordinator
+        self.tank_name = tank_name
+        self._slug = re.sub(r"[^a-z0-9_]+", "", tank_name.lower().replace(" ", "_")) + "_usage"
+        self._prev_gallons = None
+        self._prev_date = None
+
+    @property
+    def name(self):
+        return f"{self.tank_name} Daily Usage"
+
+    @property
+    def unique_id(self):
+        return f"myfuelportal_{self._slug}"
+
+    @property
+    def state(self):
+        for tank in self.coordinator.data.get("tanks", []):
+            if tank["name"] == self.tank_name:
+                curr_gallons = tank.get("gallons")
+                reading_date = tank.get("reading_date")
+
+                if curr_gallons is None or reading_date is None:
+                    return None
+
+                try:
+                    curr_date = datetime.fromisoformat(reading_date).date()
+                    if self._prev_gallons is not None and self._prev_date is not None:
+                        days = (curr_date - self._prev_date).days
+                        if days > 0:
+                            usage = (self._prev_gallons - curr_gallons) / days
+                            return round(usage, 2)
+                    # First run, store values
+                    self._prev_gallons = curr_gallons
+                    self._prev_date = curr_date
+                except Exception:
+                    return None
+        return None
+
+    @property
+    def device_class(self):
+        return SensorDeviceClass.GAS
+
+    @property
+    def state_class(self):
+        return SensorStateClass.MEASUREMENT
 
     async def async_update(self):
         await self.coordinator.async_request_refresh()
