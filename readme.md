@@ -96,7 +96,7 @@ Python packages: requests, beautifulsoup4
 
 Troubleshooting
 
-Cannot Connect: Check your credentials and ensure the portal URL is correct (https://MYPROVIDER.myfuelportal.com).
+Cannot Connect: Check your credentials and ensure the portal URL is correct (https://pgagnon.myfuelportal.com).
 
 No Entities Created: Restart Home Assistant and ensure custom_components/myfuelportal/ contains all required files.
 

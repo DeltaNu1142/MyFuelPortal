@@ -1,7 +1,7 @@
 {
   "domain": "myfuelportal",
   "name": "MyFuelPortal",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "documentation": "https://www.myfuelportal.com",
   "requirements": [
     "requests",
@@ -16,7 +16,12 @@
       {
         "entity": "sensor._daily_usage",
         "type": "gas",
-        "name": "Propane Usage"
+        "name": "Propane Daily Usage"
+      },
+      {
+        "entity": "sensor._cumulative_usage",
+        "type": "gas",
+        "name": "Propane Cumulative Usage"
       }
     ]
   }
