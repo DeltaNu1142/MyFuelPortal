@@ -1,3 +1,5 @@
+"""MyFuelPortal Sensors"""
+
 import logging
 import re
 from datetime import datetime, timedelta
@@ -7,6 +9,8 @@ import requests
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.core import callback
+from homeassistant.util import slugify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,9 +42,14 @@ async def async_setup_entry(hass, entry, async_add_entities):
             MyFuelPortalSensor(coordinator, tank_name, "last_delivery"),
             MyFuelPortalSensor(coordinator, tank_name, "reading_date"),
             MyFuelPortalUsageSensor(coordinator, tank_name),
+            MyFuelPortalCumulativeUsageSensor(coordinator, tank_name),  # NEW
         ])
     async_add_entities(sensors, True)
 
+
+# ---------------------------------------------------------------------------
+# Coordinator to fetch tank data
+# ---------------------------------------------------------------------------
 
 class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
     """Coordinator to fetch MyFuelPortal tank data."""
@@ -62,7 +71,6 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
             DATA_URL = "https://MYPROVIDER.myfuelportal.com/Tank"
 
             session = requests.Session()
-
             login_page = session.get(LOGIN_URL, timeout=10)
             login_page.raise_for_status()
             soup = BeautifulSoup(login_page.text, "html.parser")
@@ -122,8 +130,6 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
                         "capacity": capacity,
                         "last_delivery": last_delivery,
                         "reading_date": reading_date,
-                        "prev_gallons": gallons,
-                        "prev_date": reading_date
                     })
                 except Exception as e:
                     _LOGGER.warning("Failed to parse a tank: %s", e)
@@ -133,6 +139,10 @@ class MyFuelPortalDataCoordinator(DataUpdateCoordinator):
         return await self.hass.async_add_executor_job(fetch_data)
 
 
+# ---------------------------------------------------------------------------
+# Generic Tank Sensor
+# ---------------------------------------------------------------------------
+
 class MyFuelPortalSensor(Entity):
     """Generic sensor for a tank and value."""
 
@@ -140,13 +150,12 @@ class MyFuelPortalSensor(Entity):
         self.coordinator = coordinator
         self.tank_name = tank_name
         self.sensor_type = sensor_type
-
-        base_slug = re.sub(r"[^a-z0-9_]+", "", tank_name.lower().replace(" ", "_"))
-        self._slug = f"{base_slug}_{sensor_type}"
+        self._slug = re.sub(r"[^a-z0-9_]+", "", tank_name.lower().replace(" ", "_")) + f"_{sensor_type}"
+        self._attr_native_value = None
 
     @property
     def name(self):
-        return f"{self.tank_name} {self.sensor_type.capitalize()}"
+        return f"{self.tank_name} {self.sensor_type.replace('_', ' ').capitalize()}"
 
     @property
     def unique_id(self):
@@ -175,15 +184,19 @@ class MyFuelPortalSensor(Entity):
         await self.coordinator.async_request_refresh()
 
 
+# ---------------------------------------------------------------------------
+# Daily Usage Sensor
+# ---------------------------------------------------------------------------
+
 class MyFuelPortalUsageSensor(Entity):
-    """Sensor to track daily gallons used for a tank (for Energy dashboard)."""
+    """Tracks daily propane usage (for Energy dashboard)."""
 
     def __init__(self, coordinator, tank_name):
         self.coordinator = coordinator
         self.tank_name = tank_name
-        self._slug = re.sub(r"[^a-z0-9_]+", "", tank_name.lower().replace(" ", "_")) + "_usage"
         self._prev_gallons = None
         self._prev_date = None
+        self._slug = re.sub(r"[^a-z0-9_]+", "", tank_name.lower().replace(" ", "_")) + "_usage"
 
     @property
     def name(self):
@@ -210,7 +223,6 @@ class MyFuelPortalUsageSensor(Entity):
                         if days > 0:
                             usage = (self._prev_gallons - curr_gallons) / days
                             return round(usage, 2)
-                    # First run, store values
                     self._prev_gallons = curr_gallons
                     self._prev_date = curr_date
                 except Exception:
@@ -227,3 +239,81 @@ class MyFuelPortalUsageSensor(Entity):
 
     async def async_update(self):
         await self.coordinator.async_request_refresh()
+
+
+# ---------------------------------------------------------------------------
+# Cumulative Usage Sensor
+# ---------------------------------------------------------------------------
+
+class MyFuelPortalCumulativeUsageSensor(Entity):
+    """Tracks total propane consumed over time."""
+
+    def __init__(self, coordinator, tank_name):
+        self.coordinator = coordinator
+        self.tank_name = tank_name
+        self._slug = re.sub(r"[^a-z0-9_]+", "", tank_name.lower().replace(" ", "_")) + "_cumulative"
+        self._last_level = None
+        self._total_used = 0
+        self._attr_native_value = 0
+
+    @property
+    def name(self):
+        return f"{self.tank_name} Cumulative Usage"
+
+    @property
+    def unique_id(self):
+        return f"myfuelportal_{self._slug}"
+
+    @property
+    def device_class(self):
+        return SensorDeviceClass.GAS
+
+    @property
+    def state_class(self):
+        return SensorStateClass.TOTAL_INCREASING
+
+    async def async_added_to_hass(self):
+        """Restore previous total from HA recorder."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_state()
+        if last and last.state not in ("unknown", "unavailable", None):
+            try:
+                self._total_used = float(last.state)
+            except ValueError:
+                self._total_used = 0
+
+        # Load last tank level
+        tank_entity_id = f"sensor.{slugify(self._tank_name)}_gallons"
+        tank_state = self.hass.states.get(tank_entity_id)
+        if tank_state and tank_state.state not in ("unknown", "unavailable"):
+            try:
+                self._last_level = float(tank_state.state)
+            except ValueError:
+                self._last_level = None
+
+    @callback
+    def _handle_coordinator_update(self):
+        """Update cumulative total when tank level decreases."""
+        for tank in self.coordinator.data.get("tanks", []):
+            if tank["name"] == self.tank_name:
+                current_level = tank.get("gallons")
+                break
+        else:
+            current_level = None
+
+        if current_level is None:
+            return
+
+        if self._last_level is None:
+            self._last_level = current_level
+            self._attr_native_value = self._total_used
+            self.async_write_ha_state()
+            return
+
+        if current_level < self._last_level:
+            used = self._last_level - current_level
+            self._total_used += used
+
+        self._last_level = current_level
+        self._attr_native_value = round(self._total_used, 3)
+        self.async_write_ha_state()

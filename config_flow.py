@@ -17,7 +17,7 @@ class MyFuelPortalConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             import requests
 
             def login():
-                LOGIN_URL = "https://pgagnon.myfuelportal.com/Account/Login?ReturnUrl=%2F"
+                LOGIN_URL = "https://MYPROVIDER.myfuelportal.com/Account/Login?ReturnUrl=%2F"
                 session = requests.Session()
                 login_page = session.get(LOGIN_URL, timeout=10)
                 login_page.raise_for_status()
