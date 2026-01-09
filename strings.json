@@ -2,5 +2,6 @@
   "component_name": "MyFuelPortal",
   "config_flow_title": "MyFuelPortal Account",
   "username": "Email Address",
-  "password": "Password"
+  "password": "Password",
+  "daily_usage": "Daily Usage"
 }
