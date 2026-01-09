@@ -1,0 +1,14 @@
+{
+  "domain": "myfuelportal",
+  "name": "MyFuelPortal",
+  "version": "1.0.3",
+  "documentation": "https://www.myfuelportal.com",
+  "requirements": [
+    "requests",
+    "beautifulsoup4"
+  ],
+  "codeowners": [],
+  "config_flow": true,
+  "integration_type": "hub",
+  "iot_class": "cloud_polling"
+}
