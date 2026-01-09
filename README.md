@@ -2,6 +2,8 @@ MyFuelPortal Home Assistant Integration
 
 Integrate your MyFuelPortal account with Home Assistant to monitor propane tank levels, usage, and delivery information. This integration also provides a daily propane usage sensor that can be added to Home Assistant’s Energy dashboard.
 
+THIS INTEGRATION NEEDS TO BE EDITED TO ADD THE SPECIFIC GAS PROVIDER'S URL AS CONFIGURABLE. CURRENTLY ALL REFERENCES TO THE GAS PROVIDER URL ARE CALLED OUT AS "MYPROVIDER".
+
 Features
 
 Monitors your propane tank(s) individually
