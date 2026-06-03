@@ -100,6 +100,16 @@ There are two kinds of usage, and they behave differently:
 
 Forcing a refresh (calling `homeassistant.update_entity` on any entity, or reloading the integration) re-scrapes the portal on demand, but it can't make the monitor post a new level reading faster, so it won't speed up the level-based usage sensors.
 
+### Historical graphs
+
+Beyond the live sensors, the integration backfills your **delivery history** into Home Assistant's long-term statistics, so you get real **spend-over-time** and **price-over-time** charts going back to your first delivery (not just from install). Per tank, it imports:
+
+- `myfuelportal:<tank>_delivered_spend` — cumulative dollars spent on deliveries
+- `myfuelportal:<tank>_delivered_gallons` — cumulative gallons delivered
+- `myfuelportal:<tank>_delivered_price` — price per gallon at each delivery
+
+Add a **Statistics graph** card (or open Developer Tools → Statistics) to view them.
+
 ## Troubleshooting
 
 | Issue | Solution |

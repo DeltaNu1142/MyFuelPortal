@@ -17,6 +17,7 @@ from homeassistant.util import dt as dt_util
 
 from .api import AuthError, MyFuelPortalClient, MyFuelPortalError
 from .const import DEFAULT_SCAN_INTERVAL_HOURS, DELIVERY_LOOKBACK_DAYS, DOMAIN
+from .statistics import async_import_delivery_statistics
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,6 +101,18 @@ class MyFuelPortalCoordinator(DataUpdateCoordinator):
             _LOGGER.warning(
                 "Delivery history unavailable (%s); continuing without it.", err
             )
+
+        # Backfill delivery history into long-term statistics (idempotent), so HA
+        # gets real historical spend/price graphs back to the first delivery, not
+        # just values recorded forward from install.
+        if deliveries:
+            for tank in tanks:
+                name = tank.get("name")
+                if not name:
+                    continue
+                tank_deliveries = [d for d in deliveries if d.get("tank") == name]
+                if tank_deliveries:
+                    async_import_delivery_statistics(self.hass, name, tank_deliveries)
 
         # NOTE: this logs in 3× per poll (tanks/account/deliveries each open a
         # fresh session). Fine at a ~12h cadence; a single-session fetch_all is a
