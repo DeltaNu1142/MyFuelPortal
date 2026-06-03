@@ -33,7 +33,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import DeliveryData, TankData
+from .api import AccountData, DeliveryData, TankData
 from .const import DOMAIN, GALLONS_TO_CUBIC_FEET
 from .coordinator import MyFuelPortalCoordinator
 
@@ -44,13 +44,24 @@ def _slug(tank_name: str) -> str:
     return tank_name.lower().replace(" ", "_")
 
 
+def _account_device_info(entry: ConfigEntry) -> DeviceInfo:
+    """The account-level device (the 'hub'); tanks nest under it via_device."""
+    return DeviceInfo(
+        identifiers={(DOMAIN, entry.entry_id)},
+        name="MyFuelPortal Account",
+        manufacturer="MyFuelPortal",
+        model="Account",
+    )
+
+
 def _device_info(entry: ConfigEntry, tank_name: str) -> DeviceInfo:
-    """One HA device per tank, so all its sensors group together."""
+    """One HA device per tank, nested under the account device."""
     return DeviceInfo(
         identifiers={(DOMAIN, f"{entry.entry_id}_{tank_name}")},
         name=f"Propane Tank: {tank_name}",
         manufacturer="MyFuelPortal",
         model="Monitored Tank",
+        via_device=(DOMAIN, entry.entry_id),
     )
 
 
@@ -233,6 +244,39 @@ DELIVERY_SENSORS: tuple[DeliverySensorDescription, ...] = (
 )
 
 
+# --- Account-level sensors: one set per account, on the account device --------
+@dataclass(frozen=True, kw_only=True)
+class AccountSensorDescription(SensorEntityDescription):
+    """An account-level sensor; ``value_fn`` reads the AccountData dict."""
+
+    value_fn: Callable[[AccountData], StateType | date]
+
+
+ACCOUNT_SENSORS: tuple[AccountSensorDescription, ...] = (
+    AccountSensorDescription(
+        key="customer_since",
+        name="Customer Since",
+        device_class=SensorDeviceClass.DATE,
+        icon="mdi:calendar-account",
+        value_fn=lambda a: _parse_iso_date(a["customer_since"]),
+    ),
+    AccountSensorDescription(
+        key="account_balance",
+        name="Account Balance",
+        native_unit_of_measurement="USD",
+        device_class=SensorDeviceClass.MONETARY,
+        icon="mdi:cash",
+        value_fn=lambda a: a["account_balance"],
+    ),
+    AccountSensorDescription(
+        key="status",
+        name="Account Status",
+        icon="mdi:account-check",
+        value_fn=lambda a: a["status"],
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -253,11 +297,20 @@ async def async_setup_entry(
         )
         entities.append(TankDailyUsageSensor(coordinator, entry, tank_name))
         entities.append(TankCumulativeUsageSensor(coordinator, entry, tank_name))
+        # Always present — falls back to the manual price when no delivery exists.
+        entities.append(MyFuelPortalEffectivePriceSensor(coordinator, entry, tank_name))
         if deliveries_available:
             entities.extend(
                 MyFuelPortalDeliverySensor(coordinator, entry, tank_name, description)
                 for description in DELIVERY_SENSORS
             )
+
+    # Account-level sensors (once per entry), only if the home page was reachable.
+    if coordinator.data.get("account_available"):
+        entities.extend(
+            MyFuelPortalAccountSensor(coordinator, entry, description)
+            for description in ACCOUNT_SENSORS
+        )
     async_add_entities(entities)
 
 
@@ -320,6 +373,80 @@ class MyFuelPortalDeliverySensor(
         return self.entity_description.value_fn(
             _deliveries_for_tank(self.coordinator, self._tank_name)
         )
+
+
+class MyFuelPortalAccountSensor(
+    CoordinatorEntity[MyFuelPortalCoordinator], SensorEntity
+):
+    """An account-level sensor (customer since, balance, status)."""
+
+    entity_description: AccountSensorDescription
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: MyFuelPortalCoordinator,
+        entry: ConfigEntry,
+        description: AccountSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_account_{description.key}"
+        self._attr_device_info = _account_device_info(entry)
+
+    @property
+    def native_value(self) -> StateType | date:
+        account = self.coordinator.data.get("account")
+        if not account:
+            return None
+        return self.entity_description.value_fn(account)
+
+
+class MyFuelPortalEffectivePriceSensor(
+    CoordinatorEntity[MyFuelPortalCoordinator], SensorEntity
+):
+    """$/gal — the latest DELIVERED price when available, else the manual override.
+
+    The batteries-included "derived-else-manual" pattern: for providers that
+    expose delivery cost it tracks the real price; otherwise it follows the
+    Manual Price per Gallon number entity. The `source` attribute says which.
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = "Effective Price per Gallon"
+    _attr_native_unit_of_measurement = "USD/gal"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_icon = "mdi:cash-check"
+
+    def __init__(
+        self,
+        coordinator: MyFuelPortalCoordinator,
+        entry: ConfigEntry,
+        tank_name: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self._tank_name = tank_name
+        self._attr_unique_id = (
+            f"{DOMAIN}_{entry.entry_id}_{_slug(tank_name)}_effective_price_per_gallon"
+        )
+        self._attr_device_info = _device_info(entry, tank_name)
+
+    def _delivered_price(self) -> float | None:
+        deliveries = _deliveries_for_tank(self.coordinator, self._tank_name)
+        return deliveries[0]["price_per_gallon"] if deliveries else None
+
+    @property
+    def native_value(self) -> StateType:
+        delivered = self._delivered_price()
+        if delivered is not None:
+            return delivered
+        return self.coordinator.manual_price_per_gallon
+
+    @property
+    def extra_state_attributes(self) -> dict[str, str]:
+        return {
+            "source": "delivery" if self._delivered_price() is not None else "manual"
+        }
 
 
 class TankDailyUsageSensor(

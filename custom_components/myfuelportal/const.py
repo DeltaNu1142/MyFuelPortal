@@ -26,3 +26,7 @@ GALLONS_TO_CUBIC_FEET = 0.133681
 # once the account "Customer Since" date is scraped it becomes the exact start.
 # ~12 years covers essentially any account on this platform.
 DELIVERY_LOOKBACK_DAYS = 4380
+
+# Default for the manual $/gal override (the number entity) — the price fallback
+# used when the portal exposes no delivered price.
+DEFAULT_MANUAL_PRICE_PER_GALLON = 3.0

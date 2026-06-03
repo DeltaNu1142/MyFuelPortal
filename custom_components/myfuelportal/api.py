@@ -43,6 +43,7 @@ _LOGGER = logging.getLogger(__name__)
 LOGIN_PATH = "/Account/Login?ReturnUrl=%2F"
 TANK_PATH = "/Tank"
 DELIVERY_HISTORY_PATH = "/Delivery/History"
+ACCOUNT_PATH = "/"  # the post-login home page carries account-level info
 
 # Network timeout for every request, in seconds.
 TIMEOUT = 15
@@ -84,6 +85,14 @@ class DeliveryData(TypedDict):
     cost: float | None
     price_per_gallon: float | None
     detail_id: str | None
+
+
+class AccountData(TypedDict):
+    """Account-level info scraped from the home page (/)."""
+
+    customer_since: str | None  # ISO YYYY-MM-DD
+    account_balance: float | None  # USD
+    status: str | None
 
 
 # --- Exceptions --------------------------------------------------------------
@@ -298,7 +307,29 @@ class MyFuelPortalClient:
         # history and can total over it directly.
         return deliveries
 
-    # NOTE (M3): /Equipment and /Location/Details slot in here the same way —
+    def get_account(self) -> AccountData:
+        """Scrape the home page (/) for account-level info.
+
+        Customer-since / balance / status live in labeled text on the home page,
+        so we parse by label (markup-independent). Auth bounce → AuthError.
+        """
+        session = self._authenticated_session()
+        resp = self._get(session, ACCOUNT_PATH)
+        if _is_login_page(resp):
+            raise AuthError(
+                f"Loading {ACCOUNT_PATH} at {self._base} redirected to the login "
+                "page — the session was not authenticated."
+            )
+        account = _parse_account(BeautifulSoup(resp.text, "html.parser"))
+        _LOGGER.debug(
+            "Account: customer_since=%s balance=%s status=%s",
+            account["customer_since"],
+            account["account_balance"],
+            account["status"],
+        )
+        return account
+
+    # NOTE (later): /Equipment and /Location/Details slot in here the same way —
     # a get_* method + a _parse_* helper + a TypedDict for the row shape.
 
 
@@ -477,4 +508,26 @@ def _parse_delivery_row(cells: list[Tag], header_index: dict[str, int]) -> Deliv
         cost=cost,
         price_per_gallon=price_per_gallon,
         detail_id=detail_id,
+    )
+
+
+def _parse_account(soup: BeautifulSoup) -> AccountData:
+    """Pull account-level fields from the home page by labeled text.
+
+    The home page shows e.g. "Account Number: … Customer Since: MM/DD/YYYY
+    Current Account Balance: $X,XXX.XX" and "Status: Active". We regex the page
+    text by label so it survives markup changes.
+    """
+    text = soup.get_text(" ", strip=True)
+    since = re.search(
+        r"Customer\s+Since:?\s*(\d{1,2}/\d{1,2}/\d{4})", text, re.IGNORECASE
+    )
+    balance = re.search(
+        r"Current\s+Account\s+Balance:?\s*\$?([\d,]+(?:\.\d+)?)", text, re.IGNORECASE
+    )
+    status = re.search(r"Status:\s*([A-Za-z]+)", text)
+    return AccountData(
+        customer_since=_us_date_to_iso(since.group(1)) if since else None,
+        account_balance=_first_number(balance.group(1)) if balance else None,
+        status=status.group(1) if status else None,
     )

@@ -63,3 +63,11 @@ def test_parse_deliveries_handles_comma_grouped_numbers():
 def test_parse_deliveries_empty_on_no_table():
     soup = BeautifulSoup("<html><body><p>no table here</p></body></html>", "html.parser")
     assert api._parse_deliveries(soup) == []
+
+
+def test_parse_account():
+    soup = BeautifulSoup(_fixture("home.html"), "html.parser")
+    account = api._parse_account(soup)
+    assert account["customer_since"] == "2020-01-15"
+    assert account["account_balance"] == 1234.56
+    assert account["status"] == "Active"

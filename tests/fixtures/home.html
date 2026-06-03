@@ -1,0 +1,16 @@
+<!doctype html>
+<!--
+  Synthetic fixture mirroring the home page (/) account block. Fully fake data.
+  Mirrors the real markup: the account number / customer-since / balance live in
+  one labeled right-aligned block, "Customer since" also appears in a status
+  line, and "Status: Active" elsewhere. The parser keys off the label text.
+-->
+<html>
+  <body>
+    <p class="customer-status"><small>Customer since 01/15/2020</small></p>
+    <div class="col-sm-6 hidden-xs text-right">
+      Account Number: 00000000 Customer Since: 01/15/2020 Current Account Balance: $1,234.56
+    </div>
+    <span>Status: Active</span>
+  </body>
+</html>

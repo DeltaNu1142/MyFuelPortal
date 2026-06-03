@@ -18,7 +18,7 @@ from .const import (
 from .coordinator import MyFuelPortalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-PLATFORMS = ["sensor"]
+PLATFORMS = ["number", "sensor"]
 
 
 def _base_url_from_entry(entry: ConfigEntry) -> str:
