@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall, callback
 
 from .const import (
     CONF_BASE_URL,
@@ -16,9 +16,11 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import MyFuelPortalCoordinator
+from .statistics import async_import_estimated_consumption
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["number", "sensor"]
+SERVICE_BACKFILL_ENERGY = "backfill_energy_statistics"
 
 
 def _base_url_from_entry(entry: ConfigEntry) -> str:
@@ -56,7 +58,37 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # When the user saves new options, reload the entry so the new interval is
     # picked up. `async_on_unload` ensures the listener is removed on unload.
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
+
+    _async_register_services(hass)
     return True
+
+
+@callback
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register integration services once (idempotent across config entries)."""
+    if hass.services.has_service(DOMAIN, SERVICE_BACKFILL_ENERGY):
+        return
+
+    async def _handle_backfill(call: ServiceCall) -> None:
+        """Estimate historical consumption from delivery history and import it as
+        a gas statistic the Energy dashboard can use. Approximate and optional."""
+        count = 0
+        for coordinator in hass.data.get(DOMAIN, {}).values():
+            data = coordinator.data or {}
+            deliveries = data.get("deliveries", [])
+            for tank in data.get("tanks", []):
+                name = tank.get("name")
+                if not name:
+                    continue
+                tank_deliveries = [d for d in deliveries if d.get("tank") == name]
+                if tank_deliveries:
+                    async_import_estimated_consumption(hass, name, tank_deliveries)
+                    count += 1
+        _LOGGER.info(
+            "Backfilled estimated propane consumption statistics for %d tank(s)", count
+        )
+
+    hass.services.async_register(DOMAIN, SERVICE_BACKFILL_ENERGY, _handle_backfill)
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

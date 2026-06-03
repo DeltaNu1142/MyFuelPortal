@@ -31,5 +31,11 @@
         }
       }
     }
+  },
+  "services": {
+    "backfill_energy_statistics": {
+      "name": "Backfill energy statistics (approximate)",
+      "description": "OPTIONAL. Estimates historical propane consumption from your delivery history and imports it as a gas-consumption statistic, so the Energy dashboard can show usage back to your first delivery. The estimate is approximate (each delivery's gallons spread evenly across the days since the previous delivery), and covers your first-to-last delivery span. Afterward, select the '<tank> Estimated Consumption' statistic as a Gas source under Settings > Energy."
+    }
   }
 }

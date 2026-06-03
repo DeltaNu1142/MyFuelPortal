@@ -110,6 +110,8 @@ Beyond the live sensors, the integration backfills your **delivery history** int
 
 Add a **Statistics graph** card (or open Developer Tools → Statistics) to view them.
 
+**Optional: backfill the Energy dashboard.** The action `myfuelportal.backfill_energy_statistics` estimates historical *consumption* from your deliveries (each fill ≈ what was burned since the last one, spread evenly across the days) and imports it as a gas statistic, so the Energy **Gas** section can show usage back to your first delivery. It's an **approximation** (a smooth daily average, not the real burn curve), so it's **opt-in** — run it from Developer Tools → Actions, then select the **"&lt;tank&gt; Estimated Consumption"** statistic as your gas source under Settings → Energy.
+
 ## Troubleshooting
 
 | Issue | Solution |
