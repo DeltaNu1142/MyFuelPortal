@@ -179,6 +179,29 @@ def _latest_price_per_cubic_foot(deliveries: list[DeliveryData]) -> float | None
     return round(price_per_gallon / GALLONS_TO_CUBIC_FEET, 4)
 
 
+def _avg_daily_usage(deliveries: list[DeliveryData]) -> float | None:
+    """Average gal/day over the most recent delivery cycle.
+
+    Uses the latest NON-zero delivery's gallons ÷ days since the delivery before
+    it — i.e. what was consumed over the period that delivery refilled. Deliveries
+    are newest-first. This is steadier than the day-to-day tank-level deltas (and
+    is populated from history, instead of waiting for the level to drop). Skips
+    zero-gallon "no-fill" visits; None if a cycle can't be formed.
+    """
+    for i in range(len(deliveries) - 1):
+        gallons = deliveries[i]["gallons"]
+        if not gallons or gallons <= 0:
+            continue
+        this_date = _parse_iso_date(deliveries[i]["date"])
+        prev_date = _parse_iso_date(deliveries[i + 1]["date"])
+        if this_date is None or prev_date is None:
+            continue
+        days = (this_date - prev_date).days
+        if days > 0:
+            return round(gallons / days, 2)
+    return None
+
+
 @dataclass(frozen=True, kw_only=True)
 class DeliverySensorDescription(SensorEntityDescription):
     """A delivery-derived sensor; ``value_fn`` reads the tank's delivery list."""
@@ -240,6 +263,16 @@ DELIVERY_SENSORS: tuple[DeliverySensorDescription, ...] = (
         state_class=SensorStateClass.TOTAL,
         icon="mdi:cash-multiple",
         value_fn=lambda ds: round(sum(d["cost"] or 0 for d in ds), 2) if ds else None,
+    ),
+    # Usage estimated from deliveries (gal/day) — steadier than the tank-level
+    # method and populated from history rather than waiting for the level to drop.
+    DeliverySensorDescription(
+        key="average_daily_usage",
+        name="Average Daily Usage",
+        native_unit_of_measurement=UnitOfVolume.GALLONS,
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:fire",
+        value_fn=_avg_daily_usage,
     ),
 )
 

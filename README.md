@@ -39,6 +39,7 @@ Monitor your propane (or other fuel) tank in Home Assistant via [MyFuelPortal](h
 | Price per Cubic Foot | `$/ft³` — use as the Energy gas "current price" |
 | Total Spend | Lifetime delivery spend |
 | Total Delivered Gallons | Lifetime gallons delivered |
+| Average Daily Usage | Avg gal/day over the latest delivery cycle (from history) |
 
 ### Account — one device per account
 | Entity | Description |
@@ -89,6 +90,15 @@ After logging in (the portal's standard ASP.NET form + anti-forgery token), the 
 - `/` — account info *(optional)*
 
 Tank data is required; the delivery and account pages are best-effort, so a change to one of them won't take the rest down. Accounts with **multiple tanks** are supported. The satellite monitor typically updates readings about once per day.
+
+### A note on usage data
+
+There are two kinds of usage, and they behave differently:
+
+- **Daily Usage** and **Cumulative Usage** are measured from the tank monitor's level reading. The monitor only posts a new reading **about once a day**, and these only register when the level actually **drops** — so they start empty after setup and update slowly in low-use seasons (or whenever little fuel is being drawn).
+- **Average Daily Usage** is computed from your **delivery history** (gallons delivered ÷ days since the previous delivery), so it's **populated immediately** and stays steady even when the tank level is barely moving.
+
+Forcing a refresh (calling `homeassistant.update_entity` on any entity, or reloading the integration) re-scrapes the portal on demand, but it can't make the monitor post a new level reading faster, so it won't speed up the level-based usage sensors.
 
 ## Troubleshooting
 
