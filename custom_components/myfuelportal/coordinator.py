@@ -1,108 +1,56 @@
-"""MyFuelPortal data coordinator."""
+"""MyFuelPortal data update coordinator.
+
+The coordinator's only jobs are: hold the client, run it on a schedule (off the
+event loop, since `requests` is blocking), and translate the client's exceptions
+into Home Assistant's `UpdateFailed`. All scraping/parsing lives in `api.py`, so
+this file never imports requests/bs4 and never touches HTML.
+"""
+from __future__ import annotations
+
 import logging
 from datetime import timedelta
+from typing import Any
 
-from bs4 import BeautifulSoup
-import requests
-
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DEFAULT_SCAN_INTERVAL_HOURS
+from .api import AuthError, MyFuelPortalClient, MyFuelPortalError
+from .const import DEFAULT_SCAN_INTERVAL_HOURS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class MyFuelPortalCoordinator(DataUpdateCoordinator):
-    """Fetch tank data from MyFuelPortal."""
+    """Polls the portal and exposes parsed data to the platform entities."""
 
-    def __init__(self, hass, provider, username, password):
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        base_url: str,
+        username: str,
+        password: str,
+        scan_interval_hours: int = DEFAULT_SCAN_INTERVAL_HOURS,
+    ) -> None:
         super().__init__(
             hass,
             _LOGGER,
-            name="MyFuelPortal",
-            update_interval=timedelta(hours=DEFAULT_SCAN_INTERVAL_HOURS),
+            name=DOMAIN,
+            # The source data is only ~daily, so polling hourly would just hammer
+            # the portal for nothing. Interval is now caller-supplied so an
+            # OptionsFlow can let the user tune it (default 12h).
+            update_interval=timedelta(hours=scan_interval_hours),
         )
-        self.provider = provider
-        self.username = username
-        self.password = password
-        self._base = f"https://{provider}.myfuelportal.com"
+        self._client = MyFuelPortalClient(base_url, username, password)
 
-    async def _async_update_data(self):
-        return await self.hass.async_add_executor_job(self._fetch)
-
-    def _fetch(self):
-        login_url = f"{self._base}/Account/Login?ReturnUrl=%2F"
-        tank_url = f"{self._base}/Tank"
-
-        session = requests.Session()
-        page = session.get(login_url, timeout=15)
-        page.raise_for_status()
-
-        soup = BeautifulSoup(page.text, "html.parser")
-        token_el = soup.find("input", {"name": "__RequestVerificationToken"})
-        if not token_el:
-            raise UpdateFailed("Cannot find CSRF token on login page")
-
-        resp = session.post(
-            login_url,
-            data={
-                "EmailAddress": self.username,
-                "Password": self.password,
-                "RememberMe": "false",
-                "__RequestVerificationToken": token_el["value"],
-            },
-            timeout=15,
-        )
-        if "/Account/Login" in resp.url:
-            raise UpdateFailed("Login failed — check credentials")
-
-        resp = session.get(tank_url, timeout=15)
-        if resp.status_code != 200:
-            raise UpdateFailed(f"Tank page returned {resp.status_code}")
-
-        soup = BeautifulSoup(resp.text, "html.parser")
-        tanks = []
-        for div in soup.select("div.tank-row"):
-            try:
-                name_tag = div.select_one(".text-larger")
-                if not name_tag:
-                    continue
-                name = name_tag.get_text(strip=True)
-
-                pct_tag = div.select_one(".progress-bar")
-                percent = float(pct_tag.get_text(strip=True).replace("%", "")) if pct_tag else None
-
-                gal_tag = div.find(string=lambda t: t and "Approximately" in t)
-                gallons = float(gal_tag.split()[1]) if gal_tag else None
-
-                reading_tag = div.find(string=lambda t: t and "Reading Date:" in t)
-                reading_date = self._parse_date(reading_tag, "Reading Date:")
-
-                delivery_tag = div.find(string=lambda t: t and "Last Delivery:" in t)
-                last_delivery = self._parse_date(delivery_tag, "Last Delivery:")
-
-                capacity = round(gallons / (percent / 100), 1) if gallons and percent else None
-
-                tanks.append({
-                    "name": name,
-                    "percent": percent,
-                    "gallons": gallons,
-                    "capacity": capacity,
-                    "reading_date": reading_date,
-                    "last_delivery": last_delivery,
-                })
-            except Exception as exc:
-                _LOGGER.warning("Failed to parse tank: %s", exc)
-
-        return {"tanks": tanks}
-
-    @staticmethod
-    def _parse_date(tag, prefix):
-        if not tag:
-            return None
-        raw = tag.replace(prefix, "").strip()
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Fetch the latest tank data; run the blocking client in the executor."""
         try:
-            from datetime import datetime
-            return datetime.strptime(raw, "%m/%d/%Y").date().isoformat()
-        except (ValueError, AttributeError):
-            return raw
+            tanks = await self.hass.async_add_executor_job(self._client.get_tanks)
+        except AuthError as err:
+            # Bad credentials don't fix themselves on retry. (A future step can
+            # raise ConfigEntryAuthFailed here to trigger HA's reauth flow.)
+            raise UpdateFailed(f"Authentication failed: {err}") from err
+        except MyFuelPortalError as err:
+            # Transient scrape/HTTP issues — coordinator will retry next interval.
+            raise UpdateFailed(str(err)) from err
+        return {"tanks": tanks}
