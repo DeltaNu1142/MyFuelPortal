@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  Synthetic fixture mirroring the /Delivery/History page structure.
+  Fully fake data (no real account/provider info). Mirrors the real markup:
+  a single <table class="table"> with header cells and one <tr> per delivery,
+  each ending in a /Delivery/Details/{id} link. Cells have no per-column class,
+  so the parser keys off the <th> header labels.
+-->
+<html>
+  <body>
+    <table class="table" id="table-00000000-0000-0000-0000-000000000000">
+      <thead>
+        <tr>
+          <th>Delivery Date</th>
+          <th>Ticket #</th>
+          <th>Tank</th>
+          <th>Product</th>
+          <th>Gallons</th>
+          <th>Total</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>5/20/2026</td>
+          <td>100001</td>
+          <td>TANK 1: 500G #000000</td>
+          <td>Propane</td>
+          <td>300.000</td>
+          <td>$900.00</td>
+          <td><a href="/Delivery/Details/600001">Details</a></td>
+        </tr>
+        <tr>
+          <td>1/15/2026</td>
+          <td>100000</td>
+          <td>TANK 1: 500G #000000</td>
+          <td>Propane</td>
+          <td>1,250.500</td>
+          <td>$4,001.60</td>
+          <td><a href="/Delivery/Details/600000">Details</a></td>
+        </tr>
+      </tbody>
+    </table>
+  </body>
+</html>

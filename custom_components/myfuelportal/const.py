@@ -19,3 +19,10 @@ DEFAULT_SCAN_INTERVAL_HOURS = 12
 # cumulative-usage sensor accumulates consumed gallons and converts with this so
 # it carries a unit the HA Energy dashboard's Gas section accepts (ft³).
 GALLONS_TO_CUBIC_FEET = 0.133681
+
+# How far back to query delivery history. The filtered POST returns ALL matching
+# rows in one response (the grid's "10 per page" is client-side display only), so
+# a wide window simply yields the complete history. Defaulted generously here;
+# once the account "Customer Since" date is scraped it becomes the exact start.
+# ~12 years covers essentially any account on this platform.
+DELIVERY_LOOKBACK_DAYS = 4380

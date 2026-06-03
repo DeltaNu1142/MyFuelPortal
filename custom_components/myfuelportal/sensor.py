@@ -33,7 +33,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .api import TankData
+from .api import DeliveryData, TankData
 from .const import DOMAIN, GALLONS_TO_CUBIC_FEET
 from .coordinator import MyFuelPortalCoordinator
 
@@ -60,6 +60,23 @@ def _tank_data(coordinator: MyFuelPortalCoordinator, tank_name: str) -> TankData
         if tank["name"] == tank_name:
             return tank
     return None
+
+
+def _deliveries_for_tank(
+    coordinator: MyFuelPortalCoordinator, tank_name: str
+) -> list[DeliveryData]:
+    """Deliveries for a tank, newest first (rows without a date sort last).
+
+    The delivery 'Tank' cell matches the tank's name from /Tank (e.g.
+    'TANK 1: 500G #...'), so we filter on that.
+    """
+    matching = [
+        delivery
+        for delivery in coordinator.data.get("deliveries", [])
+        if delivery.get("tank") == tank_name
+    ]
+    matching.sort(key=lambda delivery: delivery.get("date") or "", reverse=True)
+    return matching
 
 
 def _parse_iso_date(value: str | None) -> date | None:
@@ -136,6 +153,86 @@ TANK_SENSORS: tuple[TankSensorDescription, ...] = (
 )
 
 
+# --- Delivery-derived sensors: read the tank's deliveries (newest first) ------
+def _latest_price_per_cubic_foot(deliveries: list[DeliveryData]) -> float | None:
+    """$/ft³ from the most recent delivery, for the Energy gas 'current price'.
+
+    Derived from the delivered $/gal so it matches the consumption unit (ft³):
+    $/ft³ = $/gal ÷ (gallons per ft³).
+    """
+    if not deliveries:
+        return None
+    price_per_gallon = deliveries[0]["price_per_gallon"]
+    if price_per_gallon is None:
+        return None
+    return round(price_per_gallon / GALLONS_TO_CUBIC_FEET, 4)
+
+
+@dataclass(frozen=True, kw_only=True)
+class DeliverySensorDescription(SensorEntityDescription):
+    """A delivery-derived sensor; ``value_fn`` reads the tank's delivery list."""
+
+    value_fn: Callable[[list[DeliveryData]], StateType]
+
+
+DELIVERY_SENSORS: tuple[DeliverySensorDescription, ...] = (
+    DeliverySensorDescription(
+        key="last_delivery_cost",
+        name="Last Delivery Cost",
+        native_unit_of_measurement="USD",
+        device_class=SensorDeviceClass.MONETARY,
+        icon="mdi:cash",
+        value_fn=lambda ds: ds[0]["cost"] if ds else None,
+    ),
+    DeliverySensorDescription(
+        key="last_delivery_gallons",
+        name="Last Delivery Gallons",
+        native_unit_of_measurement=UnitOfVolume.GALLONS,
+        device_class=SensorDeviceClass.VOLUME,
+        icon="mdi:propane-tank",
+        value_fn=lambda ds: ds[0]["gallons"] if ds else None,
+    ),
+    # Price sensors carry NO `monetary` device class on purpose — that's reserved
+    # for total-cost entities and would hide these from the Energy "current price"
+    # picker. `measurement` state class lets you graph price over time.
+    DeliverySensorDescription(
+        key="price_per_gallon",
+        name="Price per Gallon",
+        native_unit_of_measurement="USD/gal",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:cash",
+        value_fn=lambda ds: ds[0]["price_per_gallon"] if ds else None,
+    ),
+    DeliverySensorDescription(
+        key="price_per_cubic_foot",
+        name="Price per Cubic Foot",
+        native_unit_of_measurement="USD/ft³",
+        state_class=SensorStateClass.MEASUREMENT,
+        icon="mdi:cash",
+        value_fn=_latest_price_per_cubic_foot,
+    ),
+    # Totals over the fetched history (a wide date range = effectively lifetime).
+    DeliverySensorDescription(
+        key="total_delivered_gallons",
+        name="Total Delivered Gallons",
+        native_unit_of_measurement=UnitOfVolume.GALLONS,
+        device_class=SensorDeviceClass.VOLUME,
+        state_class=SensorStateClass.TOTAL,
+        icon="mdi:propane-tank",
+        value_fn=lambda ds: round(sum(d["gallons"] or 0 for d in ds), 3) if ds else None,
+    ),
+    DeliverySensorDescription(
+        key="total_spend",
+        name="Total Spend",
+        native_unit_of_measurement="USD",
+        device_class=SensorDeviceClass.MONETARY,
+        state_class=SensorStateClass.TOTAL,
+        icon="mdi:cash-multiple",
+        value_fn=lambda ds: round(sum(d["cost"] or 0 for d in ds), 2) if ds else None,
+    ),
+)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -143,6 +240,10 @@ async def async_setup_entry(
 ) -> None:
     """Create one device-worth of sensors per tank found at first refresh."""
     coordinator: MyFuelPortalCoordinator = hass.data[DOMAIN][entry.entry_id]
+    # Only add the delivery/price sensors if the delivery page was reachable, so a
+    # provider that doesn't expose it doesn't get a row of always-unavailable ones.
+    deliveries_available = coordinator.data.get("deliveries_available", False)
+
     entities: list[SensorEntity] = []
     for tank in coordinator.data.get("tanks", []):
         tank_name = tank["name"]
@@ -152,6 +253,11 @@ async def async_setup_entry(
         )
         entities.append(TankDailyUsageSensor(coordinator, entry, tank_name))
         entities.append(TankCumulativeUsageSensor(coordinator, entry, tank_name))
+        if deliveries_available:
+            entities.extend(
+                MyFuelPortalDeliverySensor(coordinator, entry, tank_name, description)
+                for description in DELIVERY_SENSORS
+            )
     async_add_entities(entities)
 
 
@@ -184,6 +290,36 @@ class MyFuelPortalTankSensor(
         if tank is None:
             return None
         return self.entity_description.value_fn(tank)
+
+
+class MyFuelPortalDeliverySensor(
+    CoordinatorEntity[MyFuelPortalCoordinator], SensorEntity
+):
+    """A delivery-derived sensor (last delivery cost/gallons, derived price)."""
+
+    entity_description: DeliverySensorDescription
+    _attr_has_entity_name = True
+
+    def __init__(
+        self,
+        coordinator: MyFuelPortalCoordinator,
+        entry: ConfigEntry,
+        tank_name: str,
+        description: DeliverySensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._tank_name = tank_name
+        self._attr_unique_id = (
+            f"{DOMAIN}_{entry.entry_id}_{_slug(tank_name)}_{description.key}"
+        )
+        self._attr_device_info = _device_info(entry, tank_name)
+
+    @property
+    def native_value(self) -> StateType:
+        return self.entity_description.value_fn(
+            _deliveries_for_tank(self.coordinator, self._tank_name)
+        )
 
 
 class TankDailyUsageSensor(

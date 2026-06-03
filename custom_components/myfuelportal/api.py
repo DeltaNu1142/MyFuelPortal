@@ -42,6 +42,7 @@ _LOGGER = logging.getLogger(__name__)
 # Portal paths (relative to the provider base URL).
 LOGIN_PATH = "/Account/Login?ReturnUrl=%2F"
 TANK_PATH = "/Tank"
+DELIVERY_HISTORY_PATH = "/Delivery/History"
 
 # Network timeout for every request, in seconds.
 TIMEOUT = 15
@@ -65,6 +66,24 @@ class TankData(TypedDict):
     capacity: float | None
     reading_date: str | None
     last_delivery: str | None
+
+
+class DeliveryData(TypedDict):
+    """One delivery row, as scraped from /Delivery/History.
+
+    `price_per_gallon` is DERIVED (cost ÷ gallons) — the portal shows the line
+    total, not a unit price. `detail_id` is the id from the row's
+    /Delivery/Details/{id} link, for fetching line items later (M3).
+    """
+
+    date: str | None
+    ticket: str | None
+    tank: str | None
+    product: str | None
+    gallons: float | None
+    cost: float | None
+    price_per_gallon: float | None
+    detail_id: str | None
 
 
 # --- Exceptions --------------------------------------------------------------
@@ -218,11 +237,69 @@ class MyFuelPortalClient:
         _LOGGER.debug("Parsed %d tank(s) from %s/Tank", len(tanks), self._base)
         return tanks
 
-    # NOTE (M2/M3): future pages slot in here as sibling methods, e.g.
-    #   def get_deliveries(self) -> list[DeliveryData]:  # scrape /Delivery/History
-    #   def get_equipment(self) -> list[EquipmentData]:  # scrape /Equipment
-    # each opening `self._authenticated_session()` and delegating to a
-    # `_parse_*` helper below, with its own TypedDict for the row shape.
+    def get_deliveries(
+        self,
+        date_from: str,
+        date_to: str,
+        tank: str = "",
+        product: str = "",
+    ) -> list[DeliveryData]:
+        """Fetch deliveries in the date range [date_from, date_to].
+
+        `date_from`/`date_to` are MM/DD/YYYY strings. The page defaults to only the
+        last month, and filtering is a FORM POST to /Delivery/History (no query
+        params): the SelectedTank / SelectedTankProduct dropdowns (empty = all)
+        plus a single `DateRange` text field. The response contains ALL matching
+        rows in one page (oldest-first; the grid's "10 per page" is client-side
+        display only), so one wide-range call yields the complete history.
+
+        Auth bounce → AuthError; no rows → WARNING + empty list.
+        """
+        session = self._authenticated_session()
+        resp = session.post(
+            self._base + DELIVERY_HISTORY_PATH,
+            data={
+                "SelectedTankProduct": product,
+                "SelectedTank": tank,
+                "DateRange": f"{date_from} - {date_to}",
+            },
+            timeout=TIMEOUT,
+        )
+        if resp.status_code != 200:
+            raise ScrapeError(
+                f"{DELIVERY_HISTORY_PATH} POST returned HTTP {resp.status_code}"
+            )
+        if _is_login_page(resp):
+            raise AuthError(
+                f"POSTing {DELIVERY_HISTORY_PATH} at {self._base} redirected to the "
+                "login page — the session was not authenticated."
+            )
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        deliveries = _parse_deliveries(soup)
+        if not deliveries:
+            _LOGGER.warning(
+                "No deliveries in %s..%s at %s%s — no history in that range, or the "
+                "portal markup changed.",
+                date_from,
+                date_to,
+                self._base,
+                DELIVERY_HISTORY_PATH,
+            )
+        _LOGGER.debug(
+            "Parsed %d delivery record(s) from %s (%s..%s)",
+            len(deliveries),
+            self._base,
+            date_from,
+            date_to,
+        )
+        # The POST returns ALL rows in the range in a single response (no server
+        # pagination — the grid pages client-side), so callers get the complete
+        # history and can total over it directly.
+        return deliveries
+
+    # NOTE (M3): /Equipment and /Location/Details slot in here the same way —
+    # a get_* method + a _parse_* helper + a TypedDict for the row shape.
 
 
 # --- Parsing helpers (pure functions over HTML) ------------------------------
@@ -323,3 +400,81 @@ def _to_float(value: str | None) -> float | None:
         return float(value)
     except ValueError:
         return None
+
+
+def _us_date_to_iso(text: str | None) -> str | None:
+    """'M/D/YYYY' -> ISO 'YYYY-MM-DD', or None if it doesn't parse."""
+    if not text:
+        return None
+    try:
+        return datetime.strptime(text.strip(), "%m/%d/%Y").date().isoformat()
+    except ValueError:
+        return None
+
+
+def _parse_deliveries(soup: BeautifulSoup) -> list[DeliveryData]:
+    """Parse the /Delivery/History table into DeliveryData rows.
+
+    Cells carry no per-column class, so we build a {header-label: column-index}
+    map from the <th> row and read each cell by MEANING — robust to the portal
+    adding or reordering columns.
+    """
+    table = soup.find("table")
+    if not isinstance(table, Tag):
+        return []
+    header_index = {
+        th.get_text(strip=True).lower(): i
+        for i, th in enumerate(table.find_all("th"))
+    }
+    deliveries: list[DeliveryData] = []
+    for row in table.find_all("tr"):
+        cells = row.find_all("td")
+        if not cells:
+            continue  # the header row has <th>, not <td>
+        parsed = _parse_delivery_row(cells, header_index)
+        if parsed is not None:
+            deliveries.append(parsed)
+    return deliveries
+
+
+def _parse_delivery_row(cells: list[Tag], header_index: dict[str, int]) -> DeliveryData | None:
+    """Turn one delivery <tr>'s cells into a DeliveryData, or None if blank."""
+
+    def cell(label: str) -> str | None:
+        i = header_index.get(label)
+        if i is None or i >= len(cells):
+            return None
+        return cells[i].get_text(strip=True)
+
+    gallons = _first_number(cell("gallons"))
+    cost = _first_number(cell("total"))
+    date_iso = _us_date_to_iso(cell("delivery date"))
+    # A row with none of the three core fields isn't a real delivery.
+    if gallons is None and cost is None and date_iso is None:
+        return None
+
+    # Derived unit price — the portal only shows the line total, not $/gal.
+    price_per_gallon = (
+        round(cost / gallons, 4) if (cost is not None and gallons) else None
+    )
+
+    # Delivery id from the row's "Details" link (/Delivery/Details/{id}).
+    detail_id: str | None = None
+    for link in cells[-1].find_all("a", href=True):
+        href = link.get("href")
+        if isinstance(href, str):
+            match = re.search(r"/Delivery/Details/(\d+)", href)
+            if match:
+                detail_id = match.group(1)
+                break
+
+    return DeliveryData(
+        date=date_iso,
+        ticket=cell("ticket #"),
+        tank=cell("tank"),
+        product=cell("product"),
+        gallons=gallons,
+        cost=cost,
+        price_per_gallon=price_per_gallon,
+        detail_id=detail_id,
+    )

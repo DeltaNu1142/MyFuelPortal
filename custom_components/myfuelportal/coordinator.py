@@ -13,9 +13,10 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import AuthError, MyFuelPortalClient, MyFuelPortalError
-from .const import DEFAULT_SCAN_INTERVAL_HOURS, DOMAIN
+from .const import DEFAULT_SCAN_INTERVAL_HOURS, DELIVERY_LOOKBACK_DAYS, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +44,13 @@ class MyFuelPortalCoordinator(DataUpdateCoordinator):
         self._client = MyFuelPortalClient(base_url, username, password)
 
     async def _async_update_data(self) -> dict[str, Any]:
-        """Fetch the latest tank data; run the blocking client in the executor."""
+        """Fetch tank data (required) and delivery history (optional).
+
+        Tank data is the core of the integration: if it (or auth) fails, the whole
+        update fails. Delivery history is best-effort — a missing/changed page is
+        logged and skipped so it can never take the tank sensors down with it.
+        """
+        # --- Required: tanks --------------------------------------------------
         try:
             tanks = await self.hass.async_add_executor_job(self._client.get_tanks)
         except AuthError as err:
@@ -53,4 +60,27 @@ class MyFuelPortalCoordinator(DataUpdateCoordinator):
         except MyFuelPortalError as err:
             # Transient scrape/HTTP issues — coordinator will retry next interval.
             raise UpdateFailed(str(err)) from err
-        return {"tanks": tanks}
+
+        # --- Optional: delivery history --------------------------------------
+        # Query a wide window (seasonal deliveries are sparse) so the most recent
+        # delivery still shows. Any failure here is logged, not fatal.
+        now = dt_util.now()
+        date_from = (now - timedelta(days=DELIVERY_LOOKBACK_DAYS)).strftime("%m/%d/%Y")
+        date_to = now.strftime("%m/%d/%Y")
+        deliveries: list[Any] = []
+        deliveries_available = False
+        try:
+            deliveries = await self.hass.async_add_executor_job(
+                self._client.get_deliveries, date_from, date_to
+            )
+            deliveries_available = True
+        except MyFuelPortalError as err:
+            _LOGGER.warning(
+                "Delivery history unavailable (%s); continuing without it.", err
+            )
+
+        return {
+            "tanks": tanks,
+            "deliveries": deliveries,
+            "deliveries_available": deliveries_available,
+        }
