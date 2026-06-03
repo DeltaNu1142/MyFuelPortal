@@ -2,96 +2,117 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
 
-Monitor your propane (or other fuel) tank levels, deliveries, and daily usage in Home Assistant via [MyFuelPortal](https://www.myfuelportal.com/). Many fuel providers use MyFuelPortal for online tank monitoring — this integration scrapes your provider's portal and creates sensors for each tank.
+Monitor your propane (or other fuel) tank in Home Assistant via [MyFuelPortal](https://www.myfuelportal.com/) — tank level, deliveries, **per-gallon pricing**, total spend, and account info. Many fuel providers use MyFuelPortal (some on their own vanity domain) for online tank monitoring; this integration logs into your provider's portal, scrapes it, and creates sensors for each tank.
 
 ## Features
 
-- **Works with any MyFuelPortal provider** — enter your provider's subdomain during setup
-- **Per-tank device grouping** — each tank appears as its own device in HA
-- **Energy dashboard ready** — Cumulative Usage sensor with `state_class: total_increasing`
-- **Auto-refresh** every 12 hours (matches portal update frequency)
-- **State restoration** — cumulative usage survives HA restarts
+- **Any MyFuelPortal provider** — enter the subdomain *or* a full vanity URL (for providers on a custom domain)
+- **Tank monitoring** — gallons, level %, capacity, last delivery, daily usage
+- **Delivery history & pricing** — last delivery cost/gallons, **derived \$/gal and \$/ft³**, total spend, total delivered
+- **Account info** — customer-since date, balance, status
+- **Effective price** — follows your actual delivered price, with a **manual override** for providers that don't publish cost
+- **Energy-dashboard ready** — a Cumulative Usage sensor (ft³, `total_increasing`) for gas consumption *and* a \$/ft³ price entity for cost
+- **Configurable poll interval** (1–48 h)
+- **Resilient** — the delivery/account pages are optional; if one changes or is missing, your tank sensors keep working
+- **State restoration** — cumulative and daily usage survive restarts
 
-## Sensors
+## Entities
 
-| Sensor | Description | State Class |
-|--------|-------------|-------------|
-| Gallons | Current gallons in tank | `measurement` |
-| Level | Tank fill percentage (%) | `measurement` |
-| Capacity | Tank capacity (gallons) | — |
-| Last Delivery | Date of last fuel delivery | — |
-| Reading Date | Date of last monitor reading | — |
-| Daily Usage | Estimated gallons/day | `measurement` |
-| Cumulative Usage | Total gallons consumed (for Energy dashboard) | `total_increasing` |
+### Tank — one device per tank
+| Entity | Description |
+|---|---|
+| Gallons | Current gallons in tank |
+| Level | Tank fill (%) |
+| Capacity | Tank capacity (gallons) |
+| Last Delivery | Date of last delivery |
+| Reading Date | Date of last monitor reading |
+| Daily Usage | Estimated gallons/day (survives restarts) |
+| Cumulative Usage | Total consumed, **ft³** — for the Energy gas dashboard |
+| Effective Price per Gallon | Latest delivered \$/gal, else the manual override |
+
+### Delivery — added when delivery history is available
+| Entity | Description |
+|---|---|
+| Last Delivery Cost | Cost of the most recent delivery |
+| Last Delivery Gallons | Gallons of the most recent delivery |
+| Price per Gallon | Derived \$/gal (cost ÷ gallons) |
+| Price per Cubic Foot | \$/ft³ — use as the Energy gas "current price" |
+| Total Spend | Lifetime delivery spend |
+| Total Delivered Gallons | Lifetime gallons delivered |
+
+### Account — one device per account
+| Entity | Description |
+|---|---|
+| Customer Since | Account start date |
+| Account Balance | Current balance |
+| Account Status | e.g. *Active* |
+| Manual Price per Gallon | Adjustable \$/gal fallback (a `number`) |
 
 ## Installation
 
-### HACS (Recommended)
+### HACS (recommended)
 
-1. Open **HACS** → **Integrations** → click the **⋮** menu (top right) → **Custom repositories**
-2. Enter this repository URL and select **Integration** as the category:
+1. **HACS** → **Integrations** → **⋮** (top right) → **Custom repositories**
+2. Add this repository URL, category **Integration**:
    ```
    https://github.com/DeltaNu1142/MyFuelPortal
    ```
-3. Click **Add**, then find **MyFuelPortal** in the HACS store and click **Install**
-4. **Restart Home Assistant**
+3. Click **Add**, find **MyFuelPortal**, **Install**, then **restart Home Assistant**
 
 ### Manual
 
-1. Download this repository
-2. Copy the `custom_components/myfuelportal/` folder into your Home Assistant `config/custom_components/` directory
-3. Restart Home Assistant
+1. Copy `custom_components/myfuelportal/` into your `config/custom_components/` directory
+2. Restart Home Assistant
 
 ## Setup
 
-1. Go to **Settings** → **Devices & Services** → **Add Integration**
-2. Search for **MyFuelPortal**
-3. Enter:
-   - **Provider subdomain** — the part before `.myfuelportal.com` in your provider's portal URL (e.g., if your portal is at `https://myprovider.myfuelportal.com`, enter `myprovider`)
-   - **Email address** — your MyFuelPortal login email
-   - **Password** — your MyFuelPortal password
-4. Sensors for your tank(s) will appear automatically, grouped under a device per tank
+1. **Settings** → **Devices & Services** → **Add Integration** → **MyFuelPortal**
+2. Enter:
+   - **Provider** — your portal's **subdomain** (e.g. `myprovider` for `myprovider.myfuelportal.com`) **or** the full URL if your provider uses a custom domain (e.g. `https://fuel.example.com`)
+   - **Email** and **Password** for your portal login
+3. Tank, delivery, and account entities are created automatically.
+
+**Options:** open the integration's **Configure** dialog to set the **poll interval** (default 12 h — the source data only updates about once a day).
 
 ## Energy Dashboard
 
-To track propane consumption in the Energy dashboard:
-
-1. Go to **Settings** → **Dashboards** → **Energy**
-2. Under **Gas consumption**, click **Add gas source**
-3. Select the **Cumulative Usage** sensor for your tank
-4. Optionally configure a fixed cost per unit (your price per gallon)
-
-The Cumulative Usage sensor tracks total gallons consumed over time. It increases as your tank level drops between deliveries and correctly handles refills (tank level going up).
+1. **Settings** → **Dashboards** → **Energy** → **Add gas source**
+2. **Gas consumption** → the tank's **Cumulative Usage** sensor (ft³)
+3. **Cost** → *Use an entity with the current price* → the tank's **Price per Cubic Foot** (your real delivered price) — or set a static price
 
 ## How It Works
 
-The integration logs into your provider's MyFuelPortal site, navigates to the tank page, and scrapes the current tank data. Your provider's satellite tank monitor typically updates readings at least once per day.
+After logging in (the portal's standard ASP.NET form + anti-forgery token), the integration scrapes:
 
-- Data refreshes every **12 hours**
-- Login uses the standard MyFuelPortal web interface
-- Supports accounts with **multiple tanks**
+- `/Tank` — tank readings **(required)**
+- `/Delivery/History` — delivery history, via a filtered POST *(optional)*
+- `/` — account info *(optional)*
+
+Tank data is required; the delivery and account pages are best-effort, so a change to one of them won't take the rest down. Accounts with **multiple tanks** are supported. The satellite monitor typically updates readings about once per day.
 
 ## Troubleshooting
 
 | Issue | Solution |
-|-------|----------|
-| Invalid credentials | Double-check your MyFuelPortal email and password |
-| Cannot connect | Verify your HA instance can reach `https://<provider>.myfuelportal.com` |
-| No sensors created | Ensure your MyFuelPortal account has active tank data |
-| Energy dashboard not updating | Wait for the next 12-hour refresh cycle, or restart the integration |
+|---|---|
+| Invalid credentials | Re-check your portal email and password |
+| Cannot connect | Verify HA can reach your portal, and that the subdomain/URL is correct |
+| No tank sensors | Ensure the account has active tank data |
+| No delivery/price sensors | Your provider may not expose delivery history; the **Manual Price per Gallon** override still drives the effective price |
+| Values look stale | The source updates ~daily — wait for the next poll, or reload the integration |
+
+Enable debug logging to see what's being scraped:
+
+```yaml
+logger:
+  logs:
+    custom_components.myfuelportal: debug
+```
 
 ## Requirements
 
-- Home Assistant **2023.7** or later
+- Home Assistant **2024.1** or later
 - A MyFuelPortal account with your fuel provider
 
 ## Credits
 
-Original integration by [DeltaNu1142](https://github.com/DeltaNu1142). Refactored for HACS compatibility, configurable providers, bug fixes, and Home Assistant best practices.
-
-### Changes from Original
-
-- **Configurable provider** — config flow prompts for subdomain; no code editing required
-- **HACS-compatible** — proper `custom_components/` structure, `hacs.json`, translations
-- **Bug fixes** — `CumulativeUsageSensor` referenced undefined `self._tank_name`; `gallons` sensor had incorrect `state_class` (`TOTAL_INCREASING` → `MEASUREMENT`); duplicate coordinator removed
-- **Best practices** — `CoordinatorEntity` base class, `SensorEntity`, device grouping per tank, proper units (`UnitOfVolume.GALLONS`), icons, state restoration for cumulative sensor
+Original integration by [DeltaNu1142](https://github.com/DeltaNu1142). This version adds delivery history & derived pricing, account info, vanity-URL support, an options flow, graceful degradation when optional pages change, and a testable scraper client (with unit tests over saved HTML fixtures).
