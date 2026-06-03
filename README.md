@@ -8,10 +8,10 @@ Monitor your propane (or other fuel) tank in Home Assistant via [MyFuelPortal](h
 
 - **Any MyFuelPortal provider** — enter the subdomain *or* a full vanity URL (for providers on a custom domain)
 - **Tank monitoring** — gallons, level %, capacity, last delivery, daily usage
-- **Delivery history & pricing** — last delivery cost/gallons, **derived \$/gal and \$/ft³**, total spend, total delivered
+- **Delivery history & pricing** — last delivery cost/gallons, **derived `$/gal` and `$/ft³`**, total spend, total delivered
 - **Account info** — customer-since date, balance, status
 - **Effective price** — follows your actual delivered price, with a **manual override** for providers that don't publish cost
-- **Energy-dashboard ready** — a Cumulative Usage sensor (ft³, `total_increasing`) for gas consumption *and* a \$/ft³ price entity for cost
+- **Energy-dashboard ready** — a Cumulative Usage sensor (ft³, `total_increasing`) for gas consumption *and* a `$/ft³` price entity for cost
 - **Configurable poll interval** (1–48 h)
 - **Resilient** — the delivery/account pages are optional; if one changes or is missing, your tank sensors keep working
 - **State restoration** — cumulative and daily usage survive restarts
@@ -28,15 +28,15 @@ Monitor your propane (or other fuel) tank in Home Assistant via [MyFuelPortal](h
 | Reading Date | Date of last monitor reading |
 | Daily Usage | Estimated gallons/day (survives restarts) |
 | Cumulative Usage | Total consumed, **ft³** — for the Energy gas dashboard |
-| Effective Price per Gallon | Latest delivered \$/gal, else the manual override |
+| Effective Price per Gallon | Latest delivered `$/gal`, else the manual override |
 
 ### Delivery — added when delivery history is available
 | Entity | Description |
 |---|---|
 | Last Delivery Cost | Cost of the most recent delivery |
 | Last Delivery Gallons | Gallons of the most recent delivery |
-| Price per Gallon | Derived \$/gal (cost ÷ gallons) |
-| Price per Cubic Foot | \$/ft³ — use as the Energy gas "current price" |
+| Price per Gallon | Derived `$/gal` (cost ÷ gallons) |
+| Price per Cubic Foot | `$/ft³` — use as the Energy gas "current price" |
 | Total Spend | Lifetime delivery spend |
 | Total Delivered Gallons | Lifetime gallons delivered |
 
@@ -46,7 +46,7 @@ Monitor your propane (or other fuel) tank in Home Assistant via [MyFuelPortal](h
 | Customer Since | Account start date |
 | Account Balance | Current balance |
 | Account Status | e.g. *Active* |
-| Manual Price per Gallon | Adjustable \$/gal fallback (a `number`) |
+| Manual Price per Gallon | Adjustable `$/gal` fallback (a `number`) |
 
 ## Installation
 
