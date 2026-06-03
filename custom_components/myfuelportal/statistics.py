@@ -123,14 +123,21 @@ def async_import_delivery_statistics(
 def async_import_estimated_consumption(
     hass: HomeAssistant, tank_name: str, deliveries: list[DeliveryData]
 ) -> dict[str, object] | None:
-    """Backfill an APPROXIMATE gas-consumption statistic (ft³) from deliveries.
+    """Backfill APPROXIMATE gas-consumption *and* cost statistics from deliveries.
 
     Each delivery refills roughly what was burned since the previous one, so the
     consumption between two deliveries is estimated as a constant daily rate
     (that fill's gallons / days since the prior fill) and spread evenly across the
     days. Accumulated and converted to ft³, it becomes a statistic
     (`myfuelportal:<tank>_estimated_consumption`) you can select as an Energy
-    dashboard Gas source to get historical gas graphs back to the first delivery.
+    dashboard Gas source.
+
+    In the same pass we accumulate a parallel *cost* statistic
+    (`myfuelportal:<tank>_estimated_cost`, USD) where each day is priced at that
+    fill's `$/gal`. The Energy dashboard can't apply a live "current price" to a
+    historical statistic — it only offers a static price or a "total costs"
+    statistic — so this gives an accurate, time-varying cost track to pair with
+    the consumption source.
 
     It's an APPROXIMATION (smooth daily average, not the real burn curve) and
     covers first delivery -> last delivery only (the stretch since the last fill
@@ -144,8 +151,10 @@ def async_import_estimated_consumption(
     if len(rows) < 2:
         return None
 
-    stats: list[StatisticData] = []
+    consumption: list[StatisticData] = []
+    cost: list[StatisticData] = []
     cumulative_ft3 = 0.0
+    cumulative_cost = 0.0
     for i in range(1, len(rows)):
         prev_start = _stat_start(rows[i - 1]["date"] or "")
         cur_start = _stat_start(rows[i]["date"] or "")
@@ -155,17 +164,33 @@ def async_import_estimated_consumption(
         days = (cur_start - prev_start).days
         if days <= 0:
             continue
-        daily_ft3 = (gallons / days) * GALLONS_TO_CUBIC_FEET
+        # Price this interval at the fill's own $/gal (fall back to cost/gallons
+        # when the portal didn't give a per-gallon figure directly).
+        per_gallon = rows[i].get("price_per_gallon")
+        if per_gallon is None:
+            fill_cost = rows[i].get("cost")
+            per_gallon = (fill_cost / gallons) if fill_cost else 0.0
+        daily_gallons = gallons / days
+        daily_ft3 = daily_gallons * GALLONS_TO_CUBIC_FEET
+        daily_cost = daily_gallons * per_gallon
         day = prev_start + timedelta(days=1)
         while day <= cur_start:
             cumulative_ft3 += daily_ft3
-            stats.append(StatisticData(start=day, state=daily_ft3, sum=cumulative_ft3))
+            cumulative_cost += daily_cost
+            consumption.append(
+                StatisticData(start=day, state=daily_ft3, sum=cumulative_ft3)
+            )
+            cost.append(
+                StatisticData(start=day, state=daily_cost, sum=cumulative_cost)
+            )
             day += timedelta(days=1)
 
-    if not stats:
+    if not consumption:
         return None
 
-    statistic_id = f"{DOMAIN}:{slugify(tank_name)}_estimated_consumption"
+    prefix = f"{DOMAIN}:{slugify(tank_name)}"
+    consumption_id = f"{prefix}_estimated_consumption"
+    cost_id = f"{prefix}_estimated_cost"
     async_add_external_statistics(
         hass,
         StatisticMetaData(
@@ -173,15 +198,29 @@ def async_import_estimated_consumption(
             has_sum=True,
             name=f"{tank_name} Estimated Consumption",
             source=DOMAIN,
-            statistic_id=statistic_id,
+            statistic_id=consumption_id,
             unit_of_measurement="ft³",
         ),
-        stats,
+        consumption,
+    )
+    async_add_external_statistics(
+        hass,
+        StatisticMetaData(
+            mean_type=StatisticMeanType.NONE,
+            has_sum=True,
+            name=f"{tank_name} Estimated Cost",
+            source=DOMAIN,
+            statistic_id=cost_id,
+            unit_of_measurement="USD",
+        ),
+        cost,
     )
     return {
-        "statistic_id": statistic_id,
-        "points": len(stats),
+        "consumption_statistic_id": consumption_id,
+        "cost_statistic_id": cost_id,
+        "points": len(consumption),
         "from": rows[0]["date"],
         "to": rows[-1]["date"],
         "total_cubic_feet": round(cumulative_ft3, 2),
+        "total_cost": round(cumulative_cost, 2),
     }

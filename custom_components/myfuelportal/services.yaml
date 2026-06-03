@@ -6,6 +6,8 @@ backfill_energy_statistics:
     show propane usage back to your first delivery. The estimate is APPROXIMATE:
     it spreads each delivery's gallons evenly across the days since the previous
     delivery (a smooth daily average, not the real burn curve) and covers the span
-    between your first and last deliveries. After running it, select the resulting
-    "<tank> Estimated Consumption" statistic as a Gas source under
-    Settings -> Energy.
+    between your first and last deliveries. It also imports a matching
+    "<tank> Estimated Cost" statistic (each day priced at that fill's $/gal).
+    After running it, add a Gas source under Settings -> Energy with the
+    "<tank> Estimated Consumption" statistic for consumption and the
+    "<tank> Estimated Cost" statistic as the total-costs entity.
