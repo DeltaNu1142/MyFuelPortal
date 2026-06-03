@@ -9,7 +9,7 @@ cards / the History panel) back to the account's first delivery.
 Three series per tank:
   * `<tank>_delivered_spend`   cumulative $ spent on deliveries (has_sum)
   * `<tank>_delivered_gallons` cumulative gallons delivered     (has_sum)
-  * `<tank>_delivered_price`   $/gal paid per delivery           (has_mean)
+  * `<tank>_delivered_price`   $/gal paid per delivery           (mean)
 
 Re-importing is idempotent: the recorder keys statistics by their start time, so
 re-running each poll just refreshes the same points (and picks up new deliveries).
@@ -18,7 +18,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+from homeassistant.components.recorder.models import (
+    StatisticData,
+    StatisticMeanType,
+    StatisticMetaData,
+)
 from homeassistant.components.recorder.statistics import async_add_external_statistics
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.util import slugify
@@ -79,7 +83,7 @@ def async_import_delivery_statistics(
     async_add_external_statistics(
         hass,
         StatisticMetaData(
-            has_mean=False,
+            mean_type=StatisticMeanType.NONE,
             has_sum=True,
             name=f"{tank_name} Delivered Spend",
             source=DOMAIN,
@@ -91,7 +95,7 @@ def async_import_delivery_statistics(
     async_add_external_statistics(
         hass,
         StatisticMetaData(
-            has_mean=False,
+            mean_type=StatisticMeanType.NONE,
             has_sum=True,
             name=f"{tank_name} Delivered Gallons",
             source=DOMAIN,
@@ -104,7 +108,7 @@ def async_import_delivery_statistics(
         async_add_external_statistics(
             hass,
             StatisticMetaData(
-                has_mean=True,
+                mean_type=StatisticMeanType.ARITHMETIC,
                 has_sum=False,
                 name=f"{tank_name} Delivered Price",
                 source=DOMAIN,
@@ -164,7 +168,7 @@ def async_import_estimated_consumption(
     async_add_external_statistics(
         hass,
         StatisticMetaData(
-            has_mean=False,
+            mean_type=StatisticMeanType.NONE,
             has_sum=True,
             name=f"{tank_name} Estimated Consumption",
             source=DOMAIN,
