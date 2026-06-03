@@ -122,7 +122,7 @@ def async_import_delivery_statistics(
 @callback
 def async_import_estimated_consumption(
     hass: HomeAssistant, tank_name: str, deliveries: list[DeliveryData]
-) -> None:
+) -> dict[str, object] | None:
     """Backfill an APPROXIMATE gas-consumption statistic (ft³) from deliveries.
 
     Each delivery refills roughly what was burned since the previous one, so the
@@ -142,7 +142,7 @@ def async_import_estimated_consumption(
         key=lambda d: d["date"] or "",
     )
     if len(rows) < 2:
-        return
+        return None
 
     stats: list[StatisticData] = []
     cumulative_ft3 = 0.0
@@ -163,8 +163,9 @@ def async_import_estimated_consumption(
             day += timedelta(days=1)
 
     if not stats:
-        return
+        return None
 
+    statistic_id = f"{DOMAIN}:{slugify(tank_name)}_estimated_consumption"
     async_add_external_statistics(
         hass,
         StatisticMetaData(
@@ -172,8 +173,15 @@ def async_import_estimated_consumption(
             has_sum=True,
             name=f"{tank_name} Estimated Consumption",
             source=DOMAIN,
-            statistic_id=f"{DOMAIN}:{slugify(tank_name)}_estimated_consumption",
+            statistic_id=statistic_id,
             unit_of_measurement="ft³",
         ),
         stats,
     )
+    return {
+        "statistic_id": statistic_id,
+        "points": len(stats),
+        "from": rows[0]["date"],
+        "to": rows[-1]["date"],
+        "total_cubic_feet": round(cumulative_ft3, 2),
+    }
