@@ -125,7 +125,7 @@ logger:
 
 ## Credits
 
-Original integration by [DeltaNu1142](https://github.com/DeltaNu1142). This version adds delivery history & derived pricing, account info, vanity-URL support, an options flow, graceful degradation when optional pages change, and a testable scraper client (with unit tests over saved HTML fixtures).
+Original integration by [DeltaNu1142](https://github.com/DeltaNu1142), refactored into a HACS-compatible, configurable integration by [floydpink](https://github.com/floydpink). This version builds on that work and adds delivery history & derived pricing, account info, vanity-URL support, an options flow, graceful degradation when optional pages change, and a testable scraper client (with unit tests over saved HTML fixtures).
 
 ## License
 
