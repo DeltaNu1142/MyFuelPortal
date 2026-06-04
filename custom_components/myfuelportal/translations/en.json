@@ -2,21 +2,34 @@
   "config": {
     "step": {
       "user": {
-        "title": "MyFuelPortal Account",
-        "description": "Enter your fuel provider's MyFuelPortal subdomain and login credentials.",
+        "title": "Connect your fuel account",
+        "description": "Enter your fuel provider's portal address and your login.\n\nUse just the subdomain (e.g. **myprovider**) or, if your provider uses a custom domain, the full URL (e.g. **https://fuel.example.com**).",
         "data": {
-          "provider": "Provider subdomain (e.g. myprovider)",
+          "provider": "Provider subdomain or portal URL",
           "username": "Email address",
           "password": "Password"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid email or password.",
-      "cannot_connect": "Cannot connect to MyFuelPortal. Check the provider name."
+      "invalid_auth": "Invalid email or password. Double-check your portal login.",
+      "cannot_connect": "Couldn't reach the portal. Check the subdomain or URL and your connection.",
+      "invalid_provider": "That doesn't look like a valid subdomain or URL."
     },
     "abort": {
-      "cannot_connect": "Unable to reach MyFuelPortal."
+      "cannot_connect": "Unable to reach MyFuelPortal.",
+      "already_configured": "This MyFuelPortal account is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "MyFuelPortal Options",
+        "description": "How often to poll the portal. The source data usually updates about once a day, so 12 hours is plenty.",
+        "data": {
+          "scan_interval_hours": "Poll interval (hours)"
+        }
+      }
     }
   }
 }
