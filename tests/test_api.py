@@ -71,3 +71,33 @@ def test_parse_account():
     assert account["customer_since"] == "2020-01-15"
     assert account["account_balance"] == 1234.56
     assert account["status"] == "Active"
+
+
+def test_group_deliveries_by_tank_splits_and_preserves_order():
+    # Two tanks interleaved; each bucket keeps insertion order.
+    deliveries = [
+        {"tank": "TANK 1", "date": "2026-01-01"},
+        {"tank": "TANK 2", "date": "2026-01-02"},
+        {"tank": "TANK 1", "date": "2026-02-01"},
+    ]
+    grouped = api.group_deliveries_by_tank(deliveries)
+    assert set(grouped) == {"TANK 1", "TANK 2"}
+    assert [d["date"] for d in grouped["TANK 1"]] == ["2026-01-01", "2026-02-01"]
+    assert [d["date"] for d in grouped["TANK 2"]] == ["2026-01-02"]
+
+
+def test_group_deliveries_by_tank_skips_unattributed_rows():
+    # Rows with no tank (None, missing, or empty string) can't be keyed -> dropped.
+    deliveries = [
+        {"tank": "TANK 1", "date": "2026-01-01"},
+        {"tank": None, "date": "2026-01-02"},
+        {"date": "2026-01-03"},
+        {"tank": "", "date": "2026-01-04"},
+    ]
+    grouped = api.group_deliveries_by_tank(deliveries)
+    assert list(grouped) == ["TANK 1"]
+    assert len(grouped["TANK 1"]) == 1
+
+
+def test_group_deliveries_by_tank_empty():
+    assert api.group_deliveries_by_tank([]) == {}

@@ -21,6 +21,7 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
 )
+from .api import group_deliveries_by_tank
 from .coordinator import MyFuelPortalCoordinator
 from .statistics import async_import_estimated_consumption
 
@@ -77,22 +78,20 @@ def _async_register_services(hass: HomeAssistant) -> None:
 
     async def _handle_backfill(call: ServiceCall) -> ServiceResponse:
         """Estimate historical consumption from delivery history and import it as
-        a gas statistic the Energy dashboard can use. Approximate and optional.
+        a gas statistic the Energy dashboard can use.
 
-        Returns a per-tank summary (statistic id, points imported, date range,
-        total ft³) so the result is visible in Developer Tools -> Actions.
+        The coordinator already imports this on every poll; this action just runs
+        it on demand (e.g. right after install, without waiting for the next poll)
+        and returns a per-tank summary (statistic id, points imported, date range,
+        totals) so the result is visible in Developer Tools -> Actions.
         """
         results: list[dict[str, object]] = []
         for coordinator in hass.data.get(DOMAIN, {}).values():
             data = coordinator.data or {}
-            deliveries = data.get("deliveries", [])
-            for tank in data.get("tanks", []):
-                name = tank.get("name")
-                if not name:
-                    continue
-                tank_deliveries = [d for d in deliveries if d.get("tank") == name]
-                if not tank_deliveries:
-                    continue
+            # Group by the deliveries' own tank attribution (same as the poll
+            # path) so this works even when the /Tank scrape returned no rows.
+            grouped = group_deliveries_by_tank(data.get("deliveries", []))
+            for name, tank_deliveries in grouped.items():
                 summary = async_import_estimated_consumption(hass, name, tank_deliveries)
                 if summary:
                     results.append({"tank": name, **summary})
