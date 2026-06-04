@@ -100,6 +100,34 @@ There are two kinds of usage, and they behave differently:
 
 Forcing a refresh (calling `homeassistant.update_entity` on any entity, or reloading the integration) re-scrapes the portal on demand, but it can't make the monitor post a new level reading faster, so it won't speed up the level-based usage sensors.
 
+### Delivery-history statistics
+
+> **Live tank statistics come for free.** The tank-monitor sensors (Cumulative Usage, Daily Usage, gallons, level) carry a `state_class`, so Home Assistant already records their long-term statistics automatically — forward from when you installed the integration. The section below is the *other* source: statistics built from your **delivery history**, which the integration imports itself to reach back **before** install.
+
+Beyond the live sensors, the integration backfills your **delivery history** into Home Assistant's long-term statistics on every poll, so you get real charts going back to your first delivery (not just from install). This happens automatically — no action required — and works even when the `/Tank` page reports no tanks that poll (the statistics are built from the deliveries themselves). Per tank, it imports two groups.
+
+**Factual — from the delivery rows:**
+
+- `myfuelportal:<tank>_delivered_spend` — cumulative dollars spent on deliveries
+- `myfuelportal:<tank>_delivered_gallons` — cumulative gallons delivered
+- `myfuelportal:<tank>_delivered_price` — price per gallon at each delivery
+
+**Estimated — approximate consumption, for the Energy dashboard:**
+
+- `myfuelportal:<tank>_estimated_consumption` (ft³) — each fill's gallons spread evenly across the days since the previous fill (a smooth daily average, **not** the real burn curve), so the Energy **Gas** section can show usage back to your first delivery
+- `myfuelportal:<tank>_estimated_cost` (USD) — the same days priced at that fill's `$/gal`
+
+Add a **Statistics graph** card (or open Developer Tools → Statistics) to view any of them. Because the estimated consumption sits in the same units (ft³) as the live **Cumulative Usage** sensor, you can chart **estimated vs actual** side by side — the estimate should track the real curve where they overlap.
+
+**Wiring the Energy dashboard — pick *one* gas source.** The Energy dashboard *sums* every gas source you add, so adding both the live and the estimated consumption would double-count where they overlap (roughly install → last delivery). Choose the one that fits:
+
+- **Live (precise, forward-only):** **Gas consumption** → the **Cumulative Usage** sensor; **Cost** → *Use an entity with the current price* → the **Price per Cubic Foot** entity.
+- **Estimated (approximate, reaches back to your first delivery):** **Gas consumption** → the **"&lt;tank&gt; Estimated Consumption"** statistic; **Cost** → *Use an entity tracking the total costs* → the **"&lt;tank&gt; Estimated Cost"** statistic.
+
+> The estimated **cost** track exists because the Energy dashboard can't apply a live "current price" to a *historical* statistic — it only offers a static price or a total-cost statistic.
+
+The `myfuelportal.backfill_energy_statistics` action runs the estimated import **on demand** (e.g. right after install, instead of waiting for the next poll) and reports a per-tank summary in Developer Tools → Actions.
+
 ## Troubleshooting
 
 | Issue | Solution |

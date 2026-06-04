@@ -4,7 +4,13 @@ from __future__ import annotations
 import logging
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 
 from .const import (
     CONF_BASE_URL,
@@ -15,10 +21,13 @@ from .const import (
     DEFAULT_SCAN_INTERVAL_HOURS,
     DOMAIN,
 )
+from .api import group_deliveries_by_tank
 from .coordinator import MyFuelPortalCoordinator
+from .statistics import async_import_estimated_consumption
 
 _LOGGER = logging.getLogger(__name__)
 PLATFORMS = ["number", "sensor"]
+SERVICE_BACKFILL_ENERGY = "backfill_energy_statistics"
 
 
 def _base_url_from_entry(entry: ConfigEntry) -> str:
@@ -56,7 +65,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # When the user saves new options, reload the entry so the new interval is
     # picked up. `async_on_unload` ensures the listener is removed on unload.
     entry.async_on_unload(entry.add_update_listener(_async_reload_entry))
+
+    _async_register_services(hass)
     return True
+
+
+@callback
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Register integration services once (idempotent across config entries)."""
+    if hass.services.has_service(DOMAIN, SERVICE_BACKFILL_ENERGY):
+        return
+
+    async def _handle_backfill(call: ServiceCall) -> ServiceResponse:
+        """Estimate historical consumption from delivery history and import it as
+        a gas statistic the Energy dashboard can use.
+
+        The coordinator already imports this on every poll; this action just runs
+        it on demand (e.g. right after install, without waiting for the next poll)
+        and returns a per-tank summary (statistic id, points imported, date range,
+        totals) so the result is visible in Developer Tools -> Actions.
+        """
+        results: list[dict[str, object]] = []
+        for coordinator in hass.data.get(DOMAIN, {}).values():
+            data = coordinator.data or {}
+            # Group by the deliveries' own tank attribution (same as the poll
+            # path) so this works even when the /Tank scrape returned no rows.
+            grouped = group_deliveries_by_tank(data.get("deliveries", []))
+            for name, tank_deliveries in grouped.items():
+                summary = async_import_estimated_consumption(hass, name, tank_deliveries)
+                if summary:
+                    results.append({"tank": name, **summary})
+        _LOGGER.info("Backfilled estimated consumption for %d tank(s)", len(results))
+        return {"tanks": results}
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_BACKFILL_ENERGY,
+        _handle_backfill,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
 
 async def _async_reload_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:

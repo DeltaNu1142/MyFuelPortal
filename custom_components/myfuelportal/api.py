@@ -87,6 +87,31 @@ class DeliveryData(TypedDict):
     detail_id: str | None
 
 
+def group_deliveries_by_tank(
+    deliveries: list[DeliveryData],
+) -> dict[str, list[DeliveryData]]:
+    """Group delivery rows by their own ``tank`` name.
+
+    Each delivery row carries the tank name it belongs to (the same string the
+    /Tank page uses), so statistics can be built straight from the delivery list
+    — independent of whether the /Tank scrape returned any rows this poll. That
+    keeps historical spend/price (and estimated consumption) flowing even when a
+    user "has deliveries but no tank feed" (e.g. the monitor is offline, or the
+    account momentarily reports no tank rows).
+
+    Rows with no tank attribution are skipped (they can't be keyed to a series).
+    Insertion order is preserved within each tank so callers don't have to assume
+    a sort.
+    """
+    by_tank: dict[str, list[DeliveryData]] = {}
+    for delivery in deliveries:
+        # Skip rows the portal didn't attribute to a tank — nothing to key on.
+        name = delivery.get("tank")
+        if name:
+            by_tank.setdefault(name, []).append(delivery)
+    return by_tank
+
+
 class AccountData(TypedDict):
     """Account-level info scraped from the home page (/)."""
 

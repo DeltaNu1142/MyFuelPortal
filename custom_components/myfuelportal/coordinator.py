@@ -15,8 +15,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from homeassistant.util import dt as dt_util
 
-from .api import AuthError, MyFuelPortalClient, MyFuelPortalError
+from .api import (
+    AuthError,
+    MyFuelPortalClient,
+    MyFuelPortalError,
+    group_deliveries_by_tank,
+)
 from .const import DEFAULT_SCAN_INTERVAL_HOURS, DELIVERY_LOOKBACK_DAYS, DOMAIN
+from .statistics import (
+    async_import_delivery_statistics,
+    async_import_estimated_consumption,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,6 +109,23 @@ class MyFuelPortalCoordinator(DataUpdateCoordinator):
             _LOGGER.warning(
                 "Delivery history unavailable (%s); continuing without it.", err
             )
+
+        # Backfill delivery history into long-term statistics (idempotent), so HA
+        # gets real historical graphs back to the first delivery, not just values
+        # recorded forward from install. Driven by the deliveries' OWN tank
+        # attribution (not the `tanks` list), so these still flow when the /Tank
+        # scrape returned no rows this poll — "deliveries but no tank feed".
+        #
+        # Per tank we import BOTH series unconditionally:
+        #   * delivered spend/gallons/price (factual, from the delivery rows)
+        #   * estimated consumption/cost    (approximate, for the Energy gas view)
+        # so the actual (live Cumulative Usage) and the estimated curve always sit
+        # side by side for comparison. They share no statistic_id, so nothing is
+        # double-counted unless the user adds BOTH as Energy gas sources (the
+        # README says to pick one). The estimated import no-ops with <2 deliveries.
+        for name, tank_deliveries in group_deliveries_by_tank(deliveries).items():
+            async_import_delivery_statistics(self.hass, name, tank_deliveries)
+            async_import_estimated_consumption(self.hass, name, tank_deliveries)
 
         # NOTE: this logs in 3× per poll (tanks/account/deliveries each open a
         # fresh session). Fine at a ~12h cadence; a single-session fetch_all is a

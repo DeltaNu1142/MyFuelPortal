@@ -1,7 +1,7 @@
 {
   "domain": "myfuelportal",
   "name": "MyFuelPortal",
-  "version": "2.2.0",
+  "version": "2.4.0",
   "documentation": "https://github.com/DeltaNu1142/MyFuelPortal",
   "requirements": ["requests", "beautifulsoup4"],
   "codeowners": ["@DeltaNu1142"],

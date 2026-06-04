@@ -31,5 +31,11 @@
         }
       }
     }
+  },
+  "services": {
+    "backfill_energy_statistics": {
+      "name": "Backfill energy statistics (approximate)",
+      "description": "Runs the estimated-consumption import on demand (it already runs automatically each poll; use this to backfill immediately, e.g. right after install). Estimates historical propane consumption from your delivery history and imports it as a gas-consumption statistic, plus a matching cost statistic (each day priced at that fill's $/gal), so the Energy dashboard can show usage and cost back to your first delivery. The estimate is approximate (each delivery's gallons spread evenly across the days since the previous delivery), and covers your first-to-last delivery span. To use it, add a Gas source under Settings > Energy using the '<tank> Estimated Consumption' statistic for consumption and the '<tank> Estimated Cost' statistic as the total-costs entity; don't also add the live Cumulative Usage sensor, or the overlap is double-counted."
+    }
   }
 }
