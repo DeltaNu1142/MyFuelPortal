@@ -89,7 +89,7 @@ def async_import_delivery_statistics(
             source=DOMAIN,
             statistic_id=f"{prefix}_delivered_spend",
             unit_of_measurement="USD",
-            unit_class="monetary",
+            unit_class=None,
         ),
         spend,
     )
@@ -116,7 +116,7 @@ def async_import_delivery_statistics(
                 source=DOMAIN,
                 statistic_id=f"{prefix}_delivered_price",
                 unit_of_measurement="USD/gal",
-                unit_class="monetary",
+                unit_class=None,
             ),
             price,
         )
