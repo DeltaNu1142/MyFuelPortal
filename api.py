@@ -65,14 +65,8 @@ class TankData(TypedDict):
     percent: float | None
     gallons: float | None
     capacity: float | None
-    # `reading_date` removed from TankData 2026-10-02: the portal's /Tank page
-    # no longer shows a "Reading Date:" label at all (confirmed by Josh), so
-    # this field could only ever resolve to None going forward. The *sensor*
-    # named "Reading Date" still exists in sensor.py — it's kept under the same
-    # key/entity for continuity, just repointed to report the poll date
-    # instead of a value scraped from here.
-    last_delivery: str | None
     estimated_next_delivery: str | None
+    last_delivery: str | None
 
 
 class DeliveryData(TypedDict):
@@ -425,10 +419,8 @@ def _parse_tank_row(div: Tag) -> TankData | None:
         percent=percent,
         gallons=gallons,
         capacity=capacity,
-        last_delivery=_labeled_date(div, "Last Delivery:"),
-        # "Estimated Next Delivery:" — new field added 2026-10-02, same labeled
-        # M/D/YYYY format as Last Delivery, so it reuses `_labeled_date` as-is.
         estimated_next_delivery=_labeled_date(div, "Estimated Next Delivery:"),
+        last_delivery=_labeled_date(div, "Last Delivery:"),
     )
 
 
