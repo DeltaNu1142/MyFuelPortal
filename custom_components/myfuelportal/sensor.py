@@ -32,6 +32,11 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
+
+def _poll_date() -> date:
+    """Return the current date in Home Assistant's configured timezone."""
+    return dt_util.now().date()
 
 from .api import AccountData, DeliveryData, TankData
 from .const import DOMAIN, GALLONS_TO_CUBIC_FEET
@@ -159,7 +164,14 @@ TANK_SENSORS: tuple[TankSensorDescription, ...] = (
         name="Reading Date",
         device_class=SensorDeviceClass.DATE,
         icon="mdi:calendar-clock",
-        value_fn=lambda tank: _parse_iso_date(tank["reading_date"]),
+        value_fn=lambda tank: _poll_date(),
+    ),
+    TankSensorDescription(
+        key="estimated_next_delivery",
+        name="Estimated Next Delivery",
+        device_class=SensorDeviceClass.DATE,
+        icon="mdi:truck-delivery-outline",
+        value_fn=lambda tank: _parse_iso_date(tank["estimated_next_delivery"]),
     ),
 )
 
@@ -544,7 +556,7 @@ class TankDailyUsageSensor(
         if tank is None:
             return
         gallons = tank["gallons"]
-        reading = _parse_iso_date(tank["reading_date"])
+        reading = _poll_date()
         if gallons is None or reading is None:
             return
 
