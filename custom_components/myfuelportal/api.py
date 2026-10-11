@@ -65,7 +65,7 @@ class TankData(TypedDict):
     percent: float | None
     gallons: float | None
     capacity: float | None
-    reading_date: str | None
+    estimated_next_delivery: str | None
     last_delivery: str | None
 
 
@@ -419,7 +419,7 @@ def _parse_tank_row(div: Tag) -> TankData | None:
         percent=percent,
         gallons=gallons,
         capacity=capacity,
-        reading_date=_labeled_date(div, "Reading Date:"),
+        estimated_next_delivery=_labeled_date(div, "Estimated Next Delivery:"),
         last_delivery=_labeled_date(div, "Last Delivery:"),
     )
 
