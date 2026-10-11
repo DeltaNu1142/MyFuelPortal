@@ -2,13 +2,10 @@
 
 Two flavours of sensor live here:
 
-  * STATELESS sensors (gallons, level, capacity, last delivery, estimated next
-    delivery, reading date) just read one field out of the latest scraped
-    ``TankData`` — except "Reading Date", which the portal stopped publishing
-    (2026-10-02) and which now reports the poll date (``_poll_date()``) instead.
-    They're defined declaratively in the ``TANK_SENSORS`` table — adding a field
-    is one row, not a new class — and all share the single
-    ``MyFuelPortalTankSensor`` implementation.
+  * STATELESS sensors (gallons, level, capacity, last delivery, reading date) just
+    read one field out of the latest scraped ``TankData``. They're defined
+    declaratively in the ``TANK_SENSORS`` table — adding a field is one row, not a
+    new class — and all share the single ``MyFuelPortalTankSensor`` implementation.
 
   * COMPUTED sensors (daily usage, cumulative usage) need memory of the previous
     reading, so they keep bespoke classes and persist their state across restarts
@@ -36,6 +33,10 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import StateType
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
+
+def _poll_date() -> date:
+    """Return the current date in Home Assistant's configured timezone."""
+    return dt_util.now().date()
 
 from .api import AccountData, DeliveryData, TankData
 from .const import DOMAIN, GALLONS_TO_CUBIC_FEET
@@ -116,19 +117,6 @@ def _coerce_float(value: object) -> float | None:
     return None
 
 
-def _poll_date() -> date:
-    """Today's date in HA's configured timezone, used as the integration's own
-    stand-in for the portal's now-defunct "Reading Date" (see TANK_SENSORS'
-    `reading_date` entry and TankDailyUsageSensor._recompute, both of which call
-    this so there's exactly one definition of "what date is this poll"). Reading
-    a live value_fn against ever-moving wall-clock time doesn't survive restarts
-    as *state* the way other TankSensorDescription fields do - it's always
-    re-evaluated live from `coordinator.data`, so a restart just means it's
-    recomputed on the next poll like any other stateless tank sensor.
-    """
-    return dt_util.now().date()
-
-
 # --- Stateless sensors: one description per field ----------------------------
 @dataclass(frozen=True, kw_only=True)
 class TankSensorDescription(SensorEntityDescription):
@@ -172,26 +160,18 @@ TANK_SENSORS: tuple[TankSensorDescription, ...] = (
         value_fn=lambda tank: _parse_iso_date(tank["last_delivery"]),
     ),
     TankSensorDescription(
-        key="estimated_next_delivery",
-        name="Estimated Next Delivery",
-        device_class=SensorDeviceClass.DATE,
-        icon="mdi:truck-delivery-outline",
-        value_fn=lambda tank: _parse_iso_date(tank["estimated_next_delivery"]),
-    ),
-    # "Reading Date" originally read a "Reading Date:" label straight off the
-    # portal's /Tank page. That label is gone (2026-10-02) and `TankData` no
-    # longer carries a `reading_date` field at all — see api.py. Rather than
-    # drop the entity (and orphan any dashboard/automation pointing at
-    # `sensor.*_reading_date`), it's kept under the same key/name, now sourced
-    # from `_poll_date()` — the date of the most recent successful poll —
-    # instead of portal content. This is the same value TankDailyUsageSensor
-    # uses for its own day-boundary tracking, so the two stay in lockstep.
-    TankSensorDescription(
         key="reading_date",
         name="Reading Date",
         device_class=SensorDeviceClass.DATE,
         icon="mdi:calendar-clock",
         value_fn=lambda tank: _poll_date(),
+    ),
+    TankSensorDescription(
+        key="estimated_next_delivery",
+        name="Estimated Next Delivery",
+        device_class=SensorDeviceClass.DATE,
+        icon="mdi:truck-delivery-outline",
+        value_fn=lambda tank: _parse_iso_date(tank["estimated_next_delivery"]),
     ),
 )
 
@@ -576,17 +556,9 @@ class TankDailyUsageSensor(
         if tank is None:
             return
         gallons = tank["gallons"]
-        if gallons is None:
-            return
-        # 2026-10-02: the portal no longer publishes a per-tank "Reading Date",
-        # so the day boundary this sensor needs now comes from the poll itself
-        # via `_poll_date()` — the same value the "Reading Date" sensor in
-        # TANK_SENSORS now reports — rather than a portal-supplied reading
-        # date. The "only advance on a NEW day" guard right below is what
-        # actually matters for correctness at the ~12h poll cadence (see
-        # DEFAULT_SCAN_INTERVAL_HOURS) — it still only accepts one transition
-        # per calendar day, same as it did with the real reading date.
         reading = _poll_date()
+        if gallons is None or reading is None:
+            return
 
         if self._prev_date is None:
             # First reading we've seen — set the baseline, no usage yet.
