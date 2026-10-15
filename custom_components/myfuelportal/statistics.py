@@ -203,6 +203,7 @@ def async_import_estimated_consumption(
             source=DOMAIN,
             statistic_id=consumption_id,
             unit_of_measurement="ft³",
+            unit_class="volume",
         ),
         consumption,
     )
@@ -215,6 +216,7 @@ def async_import_estimated_consumption(
             source=DOMAIN,
             statistic_id=cost_id,
             unit_of_measurement="USD",
+            unit_cloass=None,
         ),
         cost,
     )
