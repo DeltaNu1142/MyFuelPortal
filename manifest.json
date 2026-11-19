@@ -1,0 +1,11 @@
+{
+  "domain": "myfuelportal",
+  "name": "MyFuelPortal",
+  "version": "2.6.0",
+  "documentation": "https://github.com/DeltaNu1142/MyFuelPortal",
+  "requirements": ["requests", "beautifulsoup4"],
+  "codeowners": ["@DeltaNu1142"],
+  "config_flow": true,
+  "integration_type": "hub",
+  "iot_class": "cloud_polling"
+}
