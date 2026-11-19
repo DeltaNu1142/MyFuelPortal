@@ -216,7 +216,7 @@ def async_import_estimated_consumption(
             source=DOMAIN,
             statistic_id=cost_id,
             unit_of_measurement="USD",
-            unit_cloass=None,
+            unit_class=None,
         ),
         cost,
     )
